@@ -66,7 +66,7 @@ def order_detail(order_id):
 def track_order(order_id):
  _,o=get_order(order_id)
  if not o:return jsonify(error="Order not found"),404
- return jsonify(orderNumber=o["orderNumber"],status=o["status"],createdAt=o["createdAt"],artwork={"size":o["artwork"]["size"],"shape":o["artwork"]["shape"]},"history=o.get("history",[]),"shipping=o.get("shipping",{})")
+ return jsonify(orderNumber=o["orderNumber"],status=o["status"],createdAt=o["createdAt"],artwork={"size":o["artwork"]["size"],"shape":o["artwork"]["shape"]},"history=o.get("history",[]),"shipping":o.get("shipping",{})")
 
 @app.patch("/api/orders/<order_id>")
 def update_order(order_id):
