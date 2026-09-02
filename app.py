@@ -89,6 +89,9 @@ def update_order(order_id):
   o["shipping"].update({k:v for k,v in body["shipping"].items() if k in {"carrier","trackingNumber","trackingUrl"}})
  o["updatedAt"]=now;save_json(p,o);return jsonify(o)
 
+@app.get("/health")
+def health(): return jsonify(ok=True,service="dreamarts")
+
 @app.get("/api/dashboard")
 def dashboard():
  orders=load_orders();counts={}
