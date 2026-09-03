@@ -25,6 +25,11 @@ def get_order(oid):
 
 @app.get("/")
 def home(): return send_from_directory("static","index.html")
+@app.get("/login")
+def login_page(): return send_from_directory("static","login.html")
+@app.get("/dashboard")
+def dashboard_page(): return send_from_directory("static","dashboard.html")
+
 @app.get("/admin")
 def admin(): return send_from_directory("static","admin.html")
 @app.get("/track")
@@ -88,6 +93,30 @@ def update_order(order_id):
  if "shipping" in body and isinstance(body["shipping"],dict):
   o["shipping"].update({k:v for k,v in body["shipping"].items() if k in {"carrier","trackingNumber","trackingUrl"}})
  o["updatedAt"]=now;save_json(p,o);return jsonify(o)
+
+@app.post("/api/auth/signup")
+def signup():
+ body=request.get_json(silent=True) or {}; email=body.get("email","").strip().lower(); password=body.get("password",""); name=body.get("name","").strip()
+ if not name or not email or len(password)<6:return jsonify(error="Enter name, valid email and password of at least 6 characters."),400
+ p=os.path.join(DATA,"user_"+secure_filename(email)+".json")
+ if os.path.exists(p):return jsonify(error="An account already exists for this email."),409
+ user={"id":uuid.uuid4().hex,"name":name,"email":email,"role":"customer","createdAt":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())}
+ save_json(p,{**user,"password":password});return jsonify(ok=True,user=user)
+
+@app.post("/api/auth/login")
+def login():
+ body=request.get_json(silent=True) or {}; email=body.get("email","").strip().lower(); password=body.get("password","")
+ p=os.path.join(DATA,"user_"+secure_filename(email)+".json")
+ if not os.path.exists(p):return jsonify(error="Account not found. Create one first."),404
+ x=json.load(open(p,encoding="utf-8"))
+ if x.get("password")!=password:return jsonify(error="Incorrect password."),401
+ return jsonify(ok=True,user={k:v for k,v in x.items() if k!="password"})
+
+@app.get("/api/customer/orders")
+def customer_orders():
+ email=request.args.get("email","").strip().lower()
+ if not email:return jsonify([])
+ return jsonify([o for o in load_orders() if o.get("customer",{}).get("email","").lower()==email])
 
 @app.get("/health")
 def health(): return jsonify(ok=True,service="dreamarts")
