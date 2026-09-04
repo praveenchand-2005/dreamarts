@@ -81,3 +81,20 @@ end;$$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
 for each row execute procedure public.handle_new_user();
+
+
+-- PRIVATE CUSTOMER ARTWORK STORAGE
+insert into storage.buckets (id,name,public) values ('artwork-uploads','artwork-uploads',false) on conflict (id) do nothing;
+
+drop policy if exists "customers upload own artwork" on storage.objects;
+create policy "customers upload own artwork" on storage.objects for insert to authenticated with check (
+ bucket_id='artwork-uploads' and (storage.foldername(name))[1]=auth.uid()::text
+);
+drop policy if exists "customers view own artwork" on storage.objects;
+create policy "customers view own artwork" on storage.objects for select to authenticated using (
+ bucket_id='artwork-uploads' and (storage.foldername(name))[1]=auth.uid()::text
+);
+drop policy if exists "files insert own order" on public.artwork_files;
+create policy "files insert own order" on public.artwork_files for insert with check (
+ exists(select 1 from public.orders o where o.id=order_id and o.user_id=auth.uid())
+);
