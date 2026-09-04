@@ -110,4 +110,17 @@ def dashboard():
  for o in orders:counts[o.get("status","UNKNOWN")]=counts.get(o.get("status","UNKNOWN"),0)+1
  return jsonify(total=len(orders),counts=counts,recent=orders[:20],flow=FLOW)
 
+if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",5000))@app.get("/api/public-config")
+def public_config():
+ return jsonify(supabaseUrl=os.environ.get("SUPABASE_URL",""),supabasePublishableKey=os.environ.get("SUPABASE_PUBLISHABLE_KEY",""))
+
+@app.get("/health")
+def health(): return jsonify(ok=True,service="dreamarts")
+
+@app.get("/api/dashboard")
+def dashboard():
+ orders=load_orders();counts={}
+ for o in orders:counts[o.get("status","UNKNOWN")]=counts.get(o.get("status","UNKNOWN"),0)+1
+ return jsonify(total=len(orders),counts=counts,recent=orders[:20],flow=FLOW)
+
 if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",5000)))
