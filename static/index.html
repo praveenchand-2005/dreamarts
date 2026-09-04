@@ -61,14 +61,16 @@ if(cfg.supabaseUrl&&cfg.supabasePublishableKey){
    const s=(await supabase.auth.getSession()).data.session;
    const n=document.getElementById('notice');
    if(!s){n.textContent='Please login before creating an artwork order.';location.href='/login';return}
-   const fd=new FormData(form), width=Number(fd.get('width_mm')), height=Number(fd.get('height_mm'));
+   const fd=new FormData(form), width=Number(fd.get('width_mm')), height=Number(fd.get('height_mm')), photo=fd.get('photo');
    if(!width||!height){n.textContent='Please enter valid artwork dimensions.';return}
-   const payload={user_id:s.user.id,shape:fd.get('shape'),width_mm:width,height_mm:height,anchor_nails:Number(fd.get('anchor_nails')),string_lines:Number(fd.get('string_lines')),notes:fd.get('notes')||''};
-   const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Creating your order...';
+   if(!photo||!photo.name){n.textContent='Please select a reference photo.';return}
+   if(photo.size>15*1024*1024){n.textContent='Photo must be 15 MB or smaller.';return}
+   fd.set('user_id',s.user.id);
+   const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Uploading photo and creating order...';
    try{
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-    const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload),signal:controller.signal});clearTimeout(timer);
-    const d=await r.json();btn.disabled=false;btn.textContent='Submit custom request';
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
+    const r=await fetch('/api/my-orders-with-photo',{method:'POST',headers:{Authorization:'Bearer '+s.access_token},body:fd,signal:controller.signal});clearTimeout(timer);
+    const d=await r.json();btn.disabled=false;btn.textContent='Create artwork order';
     if(d.ok){n.textContent='Order '+d.orderNumber+' created successfully. Opening your dashboard...';setTimeout(()=>location.href='/dashboard',900)}
     else n.textContent=d.error||'Could not create order.';
    }catch(err){btn.disabled=false;btn.textContent='Submit custom request';n.textContent='Connection timed out. Please try again.'}
