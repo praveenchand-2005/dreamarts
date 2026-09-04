@@ -41,6 +41,8 @@ def home(): return send_from_directory("static","index.html")
 def login_page(): return send_from_directory("static","login.html")
 @app.get("/dashboard")
 def dashboard_page(): return send_from_directory("static","dashboard.html")
+@app.get("/studio")
+def studio_page(): return send_from_directory("static","studio.html")
 
 @app.get("/admin")
 def admin(): return send_from_directory("static","admin.html")
