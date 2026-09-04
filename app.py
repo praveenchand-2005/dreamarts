@@ -111,6 +111,20 @@ def my_orders():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(supabase_request("orders?select=*&order=created_at.desc",token=auth.split(" ",1)[1]))
 
+@app.post("/api/my-orders")
+def create_my_order():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "): return jsonify(error="Please login before creating an order."),401
+ token=auth.split(" ",1)[1]
+ b=request.get_json(silent=True) or {}
+ uid=b.get("user_id")
+ if not uid: return jsonify(error="Missing customer account."),400
+ oid="DA-"+time.strftime("%Y%m%d")+"-"+uuid.uuid4().hex[:6].upper()
+ order={"order_number":oid,"user_id":uid,"status":"NEW_REQUEST","artwork_shape":b.get("shape") or "Custom","artwork_width_mm":b.get("width_mm"),"artwork_height_mm":b.get("height_mm"),"anchor_nails":b.get("anchor_nails"),"string_lines":b.get("string_lines"),"notes":b.get("notes","")}
+ result=supabase_request("orders",method="POST",body=order,token=token)
+ if isinstance(result,dict) and "_error" in result: return jsonify(error="Could not save order.",details=result["_error"]),400
+ return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST")
+
 @app.get("/api/public-config")
 def public_config():
  return jsonify(
