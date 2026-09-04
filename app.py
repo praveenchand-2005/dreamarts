@@ -12,10 +12,11 @@ app.config["MAX_CONTENT_LENGTH"]=15*1024*1024
 ALLOWED={"jpg","jpeg","png","webp"}
 FLOW=["NEW REQUEST","PHOTO REVIEW","QUOTE SENT","AWAITING APPROVAL","PAYMENT PENDING","PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED","CANCELLED"]
 
-def supabase_request(path,method="GET",body=None,token=None):
+def supabase_request(path,method="GET",body=None,token=None,prefer=None):
  url=os.environ.get("SUPABASE_URL","").rstrip("/")+"/rest/v1/"+path
  key=os.environ.get("SUPABASE_PUBLISHABLE_KEY","");headers={"apikey":key,"Content-Type":"application/json"}
  if token: headers["Authorization"]="Bearer "+token
+ if prefer: headers["Prefer"]=prefer
  req=Request(url,data=json.dumps(body).encode() if body is not None else None,headers=headers,method=method)
  try:
   with urlopen(req,timeout=12) as r:return json.loads(r.read().decode() or "[]")
@@ -124,6 +125,44 @@ def create_my_order():
  result=supabase_request("orders",method="POST",body=order,token=token)
  if isinstance(result,dict) and "_error" in result: return jsonify(error="Could not save order.",details=result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST")
+
+@app.post("/api/my-orders-with-photo")
+def create_my_order_with_photo():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "): return jsonify(error="Please login before creating an order."),401
+ token=auth.split(" ",1)[1]
+ f=request.files.get("photo")
+ if not f or not f.filename: return jsonify(error="A reference photo is required."),400
+ ext=f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
+ if ext not in ALLOWED: return jsonify(error="Use JPG, PNG or WEBP."),400
+ uid=request.form.get("user_id","").strip()
+ if not uid: return jsonify(error="Missing customer account."),400
+ shape=request.form.get("shape","Custom"); width=request.form.get("width_mm",type=int); height=request.form.get("height_mm",type=int)
+ if not width or not height: return jsonify(error="Valid dimensions are required."),400
+ oid="DA-"+time.strftime("%Y%m%d")+"-"+uuid.uuid4().hex[:6].upper()
+ safe=secure_filename(f.filename)
+ storage_path=f"{uid}/{oid}/{uuid.uuid4().hex}.{ext}"
+ raw=f.read()
+ base=os.environ.get("SUPABASE_URL","").rstrip("/")
+ key=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
+ headers={"apikey":key,"Authorization":"Bearer "+token,"Content-Type":f.mimetype or "application/octet-stream","x-upsert":"false"}
+ try:
+  req=Request(base+"/storage/v1/object/artwork-uploads/"+storage_path,data=raw,headers=headers,method="POST")
+  with urlopen(req,timeout=30): pass
+ except HTTPError as e:
+  return jsonify(error="Photo upload failed.",details=e.read().decode()),400
+ except Exception as e:
+  return jsonify(error="Photo upload failed: "+str(e)),500
+ order={"order_number":oid,"user_id":uid,"status":"NEW_REQUEST","artwork_shape":shape,"artwork_width_mm":width,"artwork_height_mm":height,"anchor_nails":request.form.get("anchor_nails",type=int),"string_lines":request.form.get("string_lines",type=int),"notes":request.form.get("notes","")}
+ result=supabase_request("orders",method="POST",body=order,token=token,prefer="return=representation")
+ if isinstance(result,dict) and "_error" in result: return jsonify(error="Could not save order.",details=result["_error"]),400
+ order_row=result[0] if isinstance(result,list) and result else None
+ if not order_row: return jsonify(error="Order saved but could not link photo."),500
+ file_row={"order_id":order_row["id"],"file_type":"original","storage_path":storage_path}
+ file_result=supabase_request("artwork_files",method="POST",body=file_row,token=token)
+ if isinstance(file_result,dict) and "_error" in file_result:
+  return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
+ return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
 
 @app.get("/api/public-config")
 def public_config():
