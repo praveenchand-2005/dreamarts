@@ -24,7 +24,12 @@
 
 <section class="section"><div class="wrap grid2"><div><div class="eyebrow">Why Dreamarts</div><h2>Not a filter.<br>A physical artwork.</h2><p class="lead" style="margin-left:0">Thread art sits between mathematics and craftsmanship. From far away you see the image. Up close you discover every individual line.</p></div><div class="grid2"><div class="card"><b>Handcrafted</b><p>Physical nails, real thread and careful finishing.</p></div><div class="card"><b>Personal</b><p>Built around your photograph and memory.</p></div><div class="card"><b>Made to order</b><p>Shape and size selected around your space and subject.</p></div><div class="card"><b>Artist-reviewed</b><p>Every reference is checked before production begins.</p></div></div></div></section>
 
-<section id="custom" class="custom"><div class="wrap grid2"><div><div class="eyebrow">Custom artwork request</div><h2>Let's create<br>your piece.</h2><p>Send your photograph and requirements. Dreamarts will review the best shape, size and production approach before the artwork begins.</p></div><div class="card"><h3>Start your request</h3><form id="orderForm" enctype="multipart/form-data"><input name="name" placeholder="Your name" required><input name="phone" placeholder="Phone / WhatsApp" required><input name="email" type="email" placeholder="Email (optional)"><select name="size"><option>Let Dreamarts recommend</option><option>Small</option><option>Medium</option><option>Large</option><option>Custom size</option></select><select name="shape"><option>Let Dreamarts recommend</option><option>Circle</option><option>Square</option><option>Rectangle</option><option>Heart</option></select><textarea name="notes" placeholder="Tell us about the memory, preferred size or any special requirement"></textarea><label>Reference photo</label><input name="photo" type="file" accept=".jpg,.jpeg,.png,.webp" required><button class="btn" type="submit">Submit custom request</button><div class="notice" id="notice"></div></form></div></div></section>
+<section id="custom" class="custom"><div class="wrap grid2"><div><div class="eyebrow">Custom artwork request</div><h2>Let's create<br>your piece.</h2><p>Send your photograph and requirements. Dreamarts will review the best shape, size and production approach before the artwork begins.</p></div><div class="card"><h3>Start your request</h3><form id="orderForm" enctype="multipart/form-data"><input name="name" placeholder="Your name" required><input name="phone" placeholder="Phone / WhatsApp" required><input name="email" type="email" placeholder="Email (optional)"><select name="shape" id="artShape" required><option value="Circle">Circle</option><option value="Square">Square</option><option value="Rectangle">Rectangle</option><option value="Heart">Heart</option><option value="Recommend">Let Dreamarts recommend</option></select>
+<div class="grid2" style="gap:10px"><input name="width_mm" id="widthMm" type="number" min="100" max="2000" value="500" placeholder="Width (mm)" required><input name="height_mm" id="heightMm" type="number" min="100" max="2000" value="500" placeholder="Height (mm)" required></div>
+<select name="anchor_nails" id="anchorNails"><option value="300">300 nails — expressive</option><option value="600" selected>600 nails — balanced</option><option value="900">900 nails — fine detail</option><option value="1200">1200 nails — premium detail</option></select>
+<select name="string_lines" id="stringLines"><option value="2000">2,000 lines — light</option><option value="4000" selected>4,000 lines — detailed</option><option value="6000">6,000 lines — high detail</option><option value="8000">8,000 lines — collector detail</option></select>
+<div class="card" style="padding:18px;margin:4px 0;background:#f5efe6"><small>ESTIMATED CONFIGURATION</small><h3 id="configSummary" style="margin:8px 0">500 × 500 mm · Circle</h3><p id="configDetail">600 anchor nails · 4,000 thread lines · Black thread</p></div>
+<textarea name="notes" placeholder="Tell us about the memory or any special requirement"></textarea><label>Reference photo (we will connect secure storage next)</label><input name="photo" type="file" accept=".jpg,.jpeg,.png,.webp" required><button class="btn" type="submit">Submit custom request</button><div class="notice" id="notice"></div></form></div></div></section>
 
 <section id="faq" class="section faq"><div class="wrap"><div class="eyebrow">Questions</div><h2>Before you order.</h2><details><summary>Which shape is best for a portrait?</summary><p>Circle is usually the strongest choice for a single portrait because the radial thread geometry naturally frames the face. Square and rectangle work well for wider compositions.</p></details><details><summary>What sizes can I request?</summary><p>You can request small, medium, large or a completely custom size based on your wall and subject.</p></details><details><summary>What photos work best?</summary><p>Clear, well-lit images with a visible main subject and good contrast produce the strongest results.</p></details></div></section>
 <footer class="footer"><div class="wrap"><div class="brand">DREAMARTS</div><p>Custom memories. Crafted in thread.</p></div></footer>
@@ -48,19 +53,24 @@ const cfg=await fetch('/api/public-config').then(r=>r.json());
 if(cfg.supabaseUrl&&cfg.supabasePublishableKey){
  const supabase=createClient(cfg.supabaseUrl,cfg.supabasePublishableKey);
  const form=document.querySelector('#custom form');
- if(form){form.addEventListener('submit',async e=>{
-   const s=(await supabase.auth.getSession()).data.session;
-   if(!s)return;
+ const shape=document.getElementById('artShape'),w=document.getElementById('widthMm'),hh=document.getElementById('heightMm'),nails=document.getElementById('anchorNails'),lines=document.getElementById('stringLines');
+ const refresh=()=>{document.getElementById('configSummary').textContent=w.value+' × '+hh.value+' mm · '+shape.value;document.getElementById('configDetail').textContent=Number(nails.value).toLocaleString()+' anchor nails · '+Number(lines.value).toLocaleString()+' thread lines · Black thread'};
+ [shape,w,hh,nails,lines].forEach(x=>x?.addEventListener('input',refresh));refresh();
+ if(form)form.addEventListener('submit',async e=>{
    e.preventDefault();
-   const fd=new FormData(form);
-   const size=fd.get('size')||'Custom';
-   const shape=fd.get('shape')||'Custom';
-   const payload={user_id:s.user.id,shape,notes:fd.get('notes')||'',width_mm:null,height_mm:null,anchor_nails:null,string_lines:null};
-   const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Creating your order...';
-   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload),signal:controller.signal});clearTimeout(timer);
-   const d=await r.json();btn.disabled=false;btn.textContent='Submit custom request';
+   const s=(await supabase.auth.getSession()).data.session;
    const n=document.getElementById('notice');
-   if(d.ok){n.textContent='Order '+d.orderNumber+' created successfully. Opening your dashboard...';setTimeout(()=>location.href='/dashboard',1200)}
-   else n.textContent=d.error||'Could not create order.';
- })}}
-</script></body></html>
+   if(!s){n.textContent='Please login before creating an artwork order.';location.href='/login';return}
+   const fd=new FormData(form), width=Number(fd.get('width_mm')), height=Number(fd.get('height_mm'));
+   if(!width||!height){n.textContent='Please enter valid artwork dimensions.';return}
+   const payload={user_id:s.user.id,shape:fd.get('shape'),width_mm:width,height_mm:height,anchor_nails:Number(fd.get('anchor_nails')),string_lines:Number(fd.get('string_lines')),notes:fd.get('notes')||''};
+   const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Creating your order...';
+   try{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+    const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload),signal:controller.signal});clearTimeout(timer);
+    const d=await r.json();btn.disabled=false;btn.textContent='Submit custom request';
+    if(d.ok){n.textContent='Order '+d.orderNumber+' created successfully. Opening your dashboard...';setTimeout(()=>location.href='/dashboard',900)}
+    else n.textContent=d.error||'Could not create order.';
+   }catch(err){btn.disabled=false;btn.textContent='Submit custom request';n.textContent='Connection timed out. Please try again.'}
+ })
+}</script></body></html>
