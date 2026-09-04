@@ -42,4 +42,25 @@ figures.forEach(f=>{f.tabIndex=0;f.setAttribute('role','button');f.addEventListe
 document.querySelector('.lb-close').onclick=closeArt;document.querySelector('.lb-prev').onclick=()=>{const a=visible();active=(active-1+a.length)%a.length;showArt(a)};document.querySelector('.lb-next').onclick=()=>{const a=visible();active=(active+1)%a.length;showArt(a)};
 lb.addEventListener('click',e=>{if(e.target===lb)closeArt()});document.addEventListener('keydown',e=>{if(!lb.classList.contains('open'))return;if(e.key==='Escape')closeArt();if(e.key==='ArrowLeft')document.querySelector('.lb-prev').click();if(e.key==='ArrowRight')document.querySelector('.lb-next').click()});
 document.querySelectorAll('.premium-gallery img').forEach(i=>i.addEventListener('error',()=>i.closest('figure').classList.add('image-unavailable')));
+</script><script type="module">
+import{createClient}from'https://esm.sh/@supabase/supabase-js@2';
+const cfg=await fetch('/api/public-config').then(r=>r.json());
+if(cfg.supabaseUrl&&cfg.supabasePublishableKey){
+ const supabase=createClient(cfg.supabaseUrl,cfg.supabasePublishableKey);
+ const form=document.querySelector('#custom form');
+ if(form){form.addEventListener('submit',async e=>{
+   const s=(await supabase.auth.getSession()).data.session;
+   if(!s)return;
+   e.preventDefault();
+   const fd=new FormData(form);
+   const size=fd.get('size')||'Custom';
+   const shape=fd.get('shape')||'Custom';
+   const payload={user_id:s.user.id,shape,notes:fd.get('notes')||'',width_mm:null,height_mm:null,anchor_nails:null,string_lines:null};
+   const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Creating your order...';
+   const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload)});
+   const d=await r.json();btn.disabled=false;btn.textContent='Submit custom request';
+   const n=document.getElementById('notice');
+   if(d.ok){n.textContent='Order '+d.orderNumber+' created successfully. Opening your dashboard...';setTimeout(()=>location.href='/dashboard',1200)}
+   else n.textContent=d.error||'Could not create order.';
+ })}}
 </script></body></html>
