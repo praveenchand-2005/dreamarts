@@ -111,6 +111,12 @@ def my_orders():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(supabase_request("orders?select=*&order=created_at.desc",token=auth.split(" ",1)[1]))
 
+@app.get("/api/my-orders")
+def my_orders():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "): return jsonify(error="Unauthorized"),401
+ return jsonify(supabase_request("orders?select=*&order=created_at.desc",token=auth.split(" ",1)[1]))
+
 @app.get("/api/public-config")
 def public_config():
  return jsonify(
