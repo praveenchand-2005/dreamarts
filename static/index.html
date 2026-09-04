@@ -57,7 +57,7 @@ if(cfg.supabaseUrl&&cfg.supabasePublishableKey){
    const shape=fd.get('shape')||'Custom';
    const payload={user_id:s.user.id,shape,notes:fd.get('notes')||'',width_mm:null,height_mm:null,anchor_nails:null,string_lines:null};
    const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='Creating your order...';
-   const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload)});
+   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);const r=await fetch('/api/my-orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.access_token},body:JSON.stringify(payload),signal:controller.signal});clearTimeout(timer);
    const d=await r.json();btn.disabled=false;btn.textContent='Submit custom request';
    const n=document.getElementById('notice');
    if(d.ok){n.textContent='Order '+d.orderNumber+' created successfully. Opening your dashboard...';setTimeout(()=>location.href='/dashboard',1200)}
