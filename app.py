@@ -1,4 +1,6 @@
 from flask import Flask,request,jsonify,send_from_directory
+from urllib.request import Request,urlopen
+from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
 import os,json,uuid,time
 
@@ -9,6 +11,15 @@ app=Flask(__name__,static_folder="static",static_url_path="")
 app.config["MAX_CONTENT_LENGTH"]=15*1024*1024
 ALLOWED={"jpg","jpeg","png","webp"}
 FLOW=["NEW REQUEST","PHOTO REVIEW","QUOTE SENT","AWAITING APPROVAL","PAYMENT PENDING","PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED","CANCELLED"]
+
+def supabase_request(path,method="GET",body=None,token=None):
+ url=os.environ.get("SUPABASE_URL","").rstrip("/")+"/rest/v1/"+path
+ key=os.environ.get("SUPABASE_PUBLISHABLE_KEY","");headers={"apikey":key,"Content-Type":"application/json"}
+ if token: headers["Authorization"]="Bearer "+token
+ req=Request(url,data=json.dumps(body).encode() if body is not None else None,headers=headers,method=method)
+ try:
+  with urlopen(req,timeout=12) as r:return json.loads(r.read().decode() or "[]")
+ except HTTPError as e:return {"_error":e.read().decode()}
 
 def save_json(path,obj):
  with open(path,"w",encoding="utf-8") as f: json.dump(obj,f,ensure_ascii=False,indent=2)
@@ -93,6 +104,12 @@ def update_order(order_id):
  if "shipping" in body and isinstance(body["shipping"],dict):
   o["shipping"].update({k:v for k,v in body["shipping"].items() if k in {"carrier","trackingNumber","trackingUrl"}})
  o["updatedAt"]=now;save_json(p,o);return jsonify(o)
+
+@app.get("/api/my-orders")
+def my_orders():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(supabase_request("orders?select=*&order=created_at.desc",token=auth.split(" ",1)[1]))
 
 @app.get("/api/public-config")
 def public_config():
