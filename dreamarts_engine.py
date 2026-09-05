@@ -89,6 +89,8 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
     portrait_map=_portrait_importance(image_data,size,shape)
+    subject_map=_subject_mask(image_data,size,shape)
+    if engine=="subject_focus": target=target*subject_map
     # Preserve the main portrait/silhouette without making the optimizer face-only.
     importance=np.where(mask,np.clip(importance*(1+0.45*portrait_map),0,1),0)
     if engine=="portrait_aware": importance=np.where(mask,np.clip(0.45*importance+0.55*portrait_map,0,1),0)
@@ -181,6 +183,23 @@ def _multires_target(image_data, shape, size, contrast):
     medium=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(48,size//2),max(48,size//2)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
     return target, importance, mask, coarse, medium
 
+def _subject_mask(image_data, size, shape):
+    """Lightweight foreground estimator for portrait-focus mode."""
+    im=_decode(image_data)
+    im=ImageOps.fit(im,(size,size),method=Image.Resampling.LANCZOS)
+    arr=np.asarray(im,dtype=np.float32)/255.0
+    yy,xx=np.mgrid[0:size,0:size]
+    center=np.exp(-(((xx-size*.5)/(size*.34))**2+((yy-size*.48)/(size*.42))**2))
+    # Edge energy identifies coherent foreground structure.
+    gray=np.asarray(ImageOps.grayscale(im),dtype=np.float32)/255.0
+    gx=np.zeros_like(gray); gy=np.zeros_like(gray)
+    gx[:,1:-1]=gray[:,2:]-gray[:,:-2]; gy[1:-1,:]=gray[2:,:]-gray[:-2,:]
+    edge=np.sqrt(gx*gx+gy*gy)
+    if edge.max()>0: edge/=edge.max()
+    raw=np.clip(.72*center+.28*edge,0,1)
+    raw=np.asarray(Image.fromarray((raw*255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(max(2,size//25))),dtype=np.float32)/255.0
+    return np.clip(raw,0,1)
+
 def _portrait_importance(image_data, size, shape):
     """Lightweight portrait-aware saliency without a heavyweight ML dependency."""
     im=_decode(image_data)
@@ -232,7 +251,7 @@ def _quality_score(result):
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
     candidates=[]
-    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy","multiresolution","portrait_aware"):
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy","multiresolution","portrait_aware","subject_focus"):
         try:
             r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
             candidates.append(r)
