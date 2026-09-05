@@ -1,6 +1,6 @@
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Dreamarts</title><link rel="stylesheet" href="/styles.css"></head><body><nav class="nav"><div class="wrap nav" style="height:72px"><div class="brand">DREAMARTS <small>MY ACCOUNT</small></div><button class="btn" id="logout">Logout</button></div></nav><main class="wrap section"><div class="eyebrow">Customer studio</div><h2 id="hello">My Dreamarts.</h2><div class="account-grid"><aside class="account-nav"><button class="active">Overview</button><button>My Orders</button><button>Profile</button></aside><section><div class="dashboard-stats"><div class="dash-stat"><b>0</b><span>Total artworks</span></div><div class="dash-stat"><b>0</b><span>In progress</span></div></div><div class="card"><h3>My artwork orders</h3><p id="orders">Loading your real orders...</p></div></section></div></main><script type="module">
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Dreamarts</title><link rel="stylesheet" href="/styles.css"></head><body><nav class="nav"><div class="wrap nav" style="height:72px"><div class="brand">DREAMARTS <small>MY ACCOUNT</small></div><button class="btn" id="logout">Logout</button></div></nav><main class="wrap section"><div class="eyebrow">Customer studio</div><h2 id="hello">My Dreamarts.</h2><div class="account-grid"><aside class="account-nav"><button class="active">Overview</button><button>My Orders</button><button>Profile</button></aside><section><div class="dashboard-stats"><div class="dash-stat"><b>0</b><span>Total artworks</span></div><div class="dash-stat"><b>0</b><span>In progress</span></div></div><div class="card"><h3>My artwork studio</h3><div id="drafts">Loading saved artwork drafts...</div></div><div class="card"><h3>My artwork orders</h3><p id="orders">Loading your real orders...</p></div></section></div></main><script type="module">
 import{createClient}from'https://esm.sh/@supabase/supabase-js@2';
-const ordersEl=document.getElementById('orders');
+const ordersEl=document.getElementById('orders'),draftsEl=document.getElementById('drafts');
 try{
  const cfg=await fetch('/api/public-config',{cache:'no-store'}).then(r=>r.json());
  if(!cfg.supabaseUrl||!cfg.supabasePublishableKey) throw new Error('Authentication configuration unavailable');
@@ -8,6 +8,9 @@ try{
  const {data:{session}}=await supabase.auth.getSession();
  if(!session){location.replace('/login');throw new Error('No active session');}
  document.getElementById('hello').textContent='Hello, '+(session.user.user_metadata?.full_name||session.user.email?.split('@')[0]||'Dreamarts customer')+'.';
+ const sr=await fetch('/api/my-studio-sessions',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'});
+ const sessions=await sr.json();
+ if(Array.isArray(sessions)){draftsEl.innerHTML=sessions.length?sessions.map(s=>{const c=s.config||{};const vs=s.variants||[];const sel=vs[s.selected_variant||0]||{};return '<div class="order-row"><div><b>'+((c.selected_variant)||sel.name||'Artwork draft')+'</b><p>'+((c.shape)||'Custom')+' · '+(c.width_mm||'')+(c.height_mm?' × '+c.height_mm+' mm':'')+'</p><small>Engine: '+(sel.engine||c.selected_engine||'Auto')+' · '+new Date(s.updated_at).toLocaleDateString()+'</small></div><a class="btn light" href="/studio?session='+s.id+'">Open</a></div>'}).join(''):'No saved artwork drafts yet. <a href="/#custom">Create an artwork.</a>';}
  const r=await fetch('/api/my-orders',{headers:{Authorization:'Bearer '+session.access_token},cache:'no-store'});
  const orders=await r.json();
  if(!r.ok) throw new Error(orders.error||'Could not load orders');
