@@ -178,6 +178,13 @@ def save_studio_session():
   return jsonify(ok=True,session_id=sid)
  except Exception as e:return jsonify(error=str(e)),500
 
+@app.get("/api/my-studio-sessions")
+def my_studio_sessions():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ return jsonify(supabase_request("studio_sessions?select=*&order=updated_at.desc",token=token))
+
 @app.get("/api/studio/sessions/<session_id>")
 def get_studio_session(session_id):
  result=supabase_request("studio_sessions?id=eq."+session_id+"&select=*")
