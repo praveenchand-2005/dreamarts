@@ -167,6 +167,24 @@ def create_my_order_with_photo():
   return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
 
+@app.post("/api/studio/sessions")
+def save_studio_session():
+ try:
+  b=request.get_json(silent=True) or {}
+  sid=b.get("session_id") or str(uuid.uuid4())
+  payload={"id":sid,"user_id":b.get("user_id"),"config":b.get("config",{}),"variants":b.get("variants",[]),"selected_variant":b.get("selected_variant",0),"updated_at":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())}
+  result=supabase_request("studio_sessions",method="POST",body=payload,prefer="resolution=merge-duplicates,return=representation")
+  if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not persist studio session.",details=result["_error"]),400
+  return jsonify(ok=True,session_id=sid)
+ except Exception as e:return jsonify(error=str(e)),500
+
+@app.get("/api/studio/sessions/<session_id>")
+def get_studio_session(session_id):
+ result=supabase_request("studio_sessions?id=eq."+session_id+"&select=*")
+ if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not load studio session."),404
+ if not result:return jsonify(error="Studio session not found."),404
+ return jsonify(ok=True,session=result[0])
+
 @app.post("/api/studio/generate")
 def studio_generate():
  try:
