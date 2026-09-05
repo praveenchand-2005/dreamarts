@@ -20,7 +20,7 @@ async function generate(){
  try{
   const r=await fetch('/api/studio/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:imgData,shape,nails:+nails.value,lines:+lines.value,contrast:+contrast.value,tone})});
   const d=await r.json(); if(!r.ok)throw new Error(d.error||'Generation failed');
-  previewData=d.preview;stats=d.stats;paint(previewData);
+  previewData=d.preview;stats=d.stats;paint(previewData);if(d.benchmark){const winner=d.engine;const rank=d.benchmark.map((q,i)=>'#'+(i+1)+' '+q.engine+' '+Math.round(q.quality_score*100)+'%').join(' · ');document.getElementById('studioNotice').textContent='Engine judge selected '+winner+'. '+rank;}
   document.getElementById('engine').textContent='PREVIEW READY · '+d.stats.generated_lines+' OPTIMIZED PATHS';
   document.getElementById('studioNotice').textContent='Adaptive density control active. '+d.stats.generated_lines+' useful paths selected from '+d.stats.requested_lines+' requested.';
  }catch(e){document.getElementById('engine').textContent='PREVIEW ERROR';document.getElementById('studioNotice').textContent=e.message}
