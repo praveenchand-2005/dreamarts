@@ -2,7 +2,7 @@ from flask import Flask,request,jsonify,send_from_directory
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
-import os,json,uuid,time,hmac,hashlib,base64
+import os,json,uuid,time,hmac,hashlib,base64,html
 from dreamarts_engine import generate as generate_string_art, benchmark as benchmark_string_art
 
 BASE=os.path.dirname(__file__)
@@ -88,6 +88,15 @@ def my_notifications():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  token=auth.split(" ",1)[1]
  return jsonify(supabase_request("notifications?select=*&order=created_at.desc&limit=30",token=token))
+
+def send_transactional_email(to_email,subject,message):
+ api_key=os.environ.get("RESEND_API_KEY","");sender=os.environ.get("RESEND_FROM_EMAIL","")
+ if not api_key or not sender or not to_email:return False
+ body={"from":sender,"to":[to_email],"subject":subject,"html":"<h2>Dreamarts</h2><p>"+html.escape(message)+"</p>"}
+ try:
+  req=Request("https://api.resend.com/emails",data=json.dumps(body).encode(),headers={"Authorization":"Bearer "+api_key,"Content-Type":"application/json"},method="POST")
+  with urlopen(req,timeout=15) as r:return 200<=r.status<300
+ except Exception:return False
 
 def create_order_notification(token,order_number,title,message,kind="order_update"):
  rows=supabase_request("orders?order_number=eq."+order_number+"&select=user_id",token=token)
