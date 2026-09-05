@@ -167,6 +167,22 @@ def create_my_order_with_photo():
   return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
 
+@app.post("/api/studio/checkout")
+def studio_checkout():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Please login before checkout."),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ uid=b.get("user_id");sid=b.get("session_id")
+ if not uid or not sid:return jsonify(error="Missing artwork session."),400
+ session=supabase_request("studio_sessions?id=eq."+sid+"&select=*",token=token)
+ if not isinstance(session,list) or not session:return jsonify(error="Saved artwork session not found."),404
+ s=session[0];c=s.get("config") or {};vs=s.get("variants") or [];idx=int(s.get("selected_variant") or 0);chosen=vs[idx] if idx<len(vs) else {}
+ oid="DA-"+time.strftime("%Y%m%d")+"-"+uuid.uuid4().hex[:6].upper()
+ order={"order_number":oid,"user_id":uid,"status":"AWAITING_APPROVAL","artwork_shape":c.get("shape","Custom"),"artwork_width_mm":c.get("width_mm"),"artwork_height_mm":c.get("height_mm"),"anchor_nails":c.get("anchor_nails") or c.get("nails"),"string_lines":c.get("string_lines") or c.get("lines"),"notes":json.dumps({"studio_session_id":sid,"selected_engine":chosen.get("engine") or c.get("selected_engine"),"selected_variant":chosen.get("name") or c.get("selected_variant"),"artwork_focus":c.get("artwork_focus") or c.get("focus"),"thread_tone":c.get("thread_tone") or c.get("tone")})}
+ result=supabase_request("orders",method="POST",body=order,token=token,prefer="return=representation")
+ if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not create production order.",details=result["_error"]),400
+ return jsonify(ok=True,orderNumber=oid,status="AWAITING_APPROVAL")
+
 @app.post("/api/studio/sessions")
 def save_studio_session():
  try:
