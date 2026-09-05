@@ -116,6 +116,8 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
             # Density governor + anti-black-spot + mild exploration.
             score=float(gain.mean()-1.8*over.mean()-0.22*coverage[ys,xs].mean())
             if len(sequence)>2 and cand==sequence[-2][0]: score-=0.12
+            recent=[z for pair in sequence[-18:] for z in pair]
+            if int(cand) in recent: score-=0.045
             # Public-engine-inspired recency buffer: discourage recently visited nails.
             recent=[z for pair in sequence[-18:] for z in pair]
             if int(cand) in recent: score-=0.045
