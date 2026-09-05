@@ -167,6 +167,15 @@ def create_my_order_with_photo():
   return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
 
+@app.patch("/api/my-orders/<order_id>/customer-approve")
+def customer_approve_order(order_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ result=supabase_request("orders?order_number=eq."+order_id,method="PATCH",body={"status":"PAYMENT_PENDING"},token=token,prefer="return=representation")
+ if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not approve order.",details=result["_error"]),400
+ return jsonify(ok=True,status="PAYMENT_PENDING")
+
 @app.post("/api/studio/checkout")
 def studio_checkout():
  auth=request.headers.get("Authorization","")
