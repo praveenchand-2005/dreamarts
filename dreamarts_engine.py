@@ -89,6 +89,8 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
     if engine=="public_precalc_greedy": importance=np.where(mask,0.65*target+0.35*importance,0).astype(np.float32)
+    elif engine=="adaptive_coverage": importance=np.where(mask,0.55*target+0.45*importance,0).astype(np.float32)
+    elif engine=="exploration_greedy": importance=np.where(mask,0.70*target+0.30*importance,0).astype(np.float32)
     if engine=="residual_greedy": importance=np.where(mask,target,0).astype(np.float32)
     elif engine=="edge_weighted": importance=np.where(mask,0.45*target+0.55*importance,0).astype(np.float32)
     pts=_shape_points(shape,nails)
@@ -115,6 +117,8 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
             over=np.maximum(coverage[ys,xs]-target[ys,xs],0)
             # Density governor + anti-black-spot + mild exploration.
             score=float(gain.mean()-1.8*over.mean()-0.22*coverage[ys,xs].mean())
+            if engine=="adaptive_coverage": score-=0.40*float(np.maximum(coverage[ys,xs]-0.72,0).mean())
+            if engine=="exploration_greedy": score+=0.018*abs(int(cand)-current)/max(1,nails//2)
             if len(sequence)>2 and cand==sequence[-2][0]: score-=0.12
             recent=[z for pair in sequence[-18:] for z in pair]
             if int(cand) in recent: score-=0.045
@@ -162,10 +166,19 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     }
 
 
+def _quality_score(result):
+    st=result["stats"]
+    # Combined selector: reconstruction error + efficiency + density safety.
+    mse=float(st.get("mse",1))
+    used=max(1,int(st.get("generated_lines",1)))
+    req=max(1,int(st.get("requested_lines",used)))
+    efficiency=used/req
+    return mse + 0.0015*max(0,efficiency-0.92)
+
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
     candidates=[]
-    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy"):
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy"):
         try:
             r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
             candidates.append(r)
@@ -173,5 +186,5 @@ def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, t
             pass
     if not candidates: raise RuntimeError("No generation engine completed")
     # Lower residual MSE wins; future adapters can add perceptual scoring.
-    best=min(candidates,key=lambda r:r["stats"]["mse"])
+    best=min(candidates,key=_quality_score)
     return best, [{"engine":r["engine"],**r["stats"]} for r in candidates]
