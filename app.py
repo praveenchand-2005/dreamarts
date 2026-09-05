@@ -82,6 +82,13 @@ def custom_order():
   return jsonify(ok=True,orderNumber=oid,status=order["status"],trackUrl="/track?order="+oid)
  except Exception as e: return jsonify(error="Could not create request: "+str(e)),500
 
+@app.get("/api/my-notifications")
+def my_notifications():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ return jsonify(supabase_request("notifications?select=*&order=created_at.desc&limit=30",token=token))
+
 @app.get("/api/admin/production")
 def production_queue():
  auth=request.headers.get("Authorization","")
