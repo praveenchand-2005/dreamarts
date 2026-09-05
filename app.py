@@ -2,7 +2,7 @@ from flask import Flask,request,jsonify,send_from_directory
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
-import os,json,uuid,time
+import os,json,uuid,time,hmac,hashlib,base64
 from dreamarts_engine import generate as generate_string_art, benchmark as benchmark_string_art
 
 BASE=os.path.dirname(__file__)
@@ -22,6 +22,15 @@ def supabase_request(path,method="GET",body=None,token=None,prefer=None):
  try:
   with urlopen(req,timeout=12) as r:return json.loads(r.read().decode() or "[]")
  except HTTPError as e:return {"_error":e.read().decode()}
+
+def razorpay_request(path,body=None):
+ key=os.environ.get("RAZORPAY_KEY_ID","");secret=os.environ.get("RAZORPAY_KEY_SECRET","")
+ if not key or not secret: raise RuntimeError("Razorpay is not configured")
+ auth=base64.b64encode((key+":"+secret).encode()).decode()
+ req=Request("https://api.razorpay.com/v1/"+path,data=json.dumps(body).encode() if body else None,headers={"Authorization":"Basic "+auth,"Content-Type":"application/json"},method="POST" if body else "GET")
+ try:
+  with urlopen(req,timeout=20) as r:return json.loads(r.read().decode())
+ except HTTPError as e: raise RuntimeError(e.read().decode())
 
 def save_json(path,obj):
  with open(path,"w",encoding="utf-8") as f: json.dump(obj,f,ensure_ascii=False,indent=2)
@@ -185,6 +194,45 @@ def create_my_order_with_photo():
  if isinstance(file_result,dict) and "_error" in file_result:
   return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
+
+@app.post("/api/payments/create-order")
+def create_payment_order():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Please login before payment."),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};order_no=b.get("order_number","")
+ rows=supabase_request("orders?order_number=eq."+order_no+"&select=*",token=token)
+ if not isinstance(rows,list) or not rows:return jsonify(error="Order not found."),404
+ o=rows[0]
+ if o.get("status")!="PAYMENT_PENDING":return jsonify(error="This order is not ready for payment."),400
+ total=float(o.get("price") or 0)+float(o.get("shipping_cost") or 0)
+ if total<=0:return jsonify(error="Quote amount has not been set yet."),400
+ rp=razorpay_request("orders",{"amount":round(total*100),"currency":"INR","receipt":order_no,"notes":{"dreamarts_order":order_no}})
+ return jsonify(ok=True,key_id=os.environ.get("RAZORPAY_KEY_ID"),razorpay_order_id=rp["id"],amount=round(total*100),currency="INR",order_number=order_no)
+
+@app.post("/api/payments/verify")
+def verify_payment():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ payload=b.get("razorpay_order_id","")+"|"+b.get("razorpay_payment_id","")
+ expected=hmac.new(os.environ.get("RAZORPAY_KEY_SECRET","").encode(),payload.encode(),hashlib.sha256).hexdigest()
+ if not hmac.compare_digest(expected,b.get("razorpay_signature","")):return jsonify(error="Payment verification failed."),400
+ order_no=b.get("order_number","")
+ result=supabase_request("orders?order_number=eq."+order_no,method="PATCH",body={"status":"PAID","admin_notes":"Razorpay payment verified: "+b.get("razorpay_payment_id","")},token=token,prefer="return=representation")
+ if isinstance(result,dict) and "_error" in result:return jsonify(error="Payment recorded but order update failed."),500
+ return jsonify(ok=True,status="PAID")
+
+@app.post("/api/payments/webhook")
+def razorpay_webhook():
+ secret=os.environ.get("RAZORPAY_WEBHOOK_SECRET","")
+ raw=request.get_data();sig=request.headers.get("X-Razorpay-Signature","")
+ if secret and not hmac.compare_digest(hmac.new(secret.encode(),raw,hashlib.sha256).hexdigest(),sig):return "Invalid signature",400
+ try:data=json.loads(raw.decode())
+ except:return "Bad payload",400
+ if data.get("event")=="payment.captured":
+  p=data.get("payload",{}).get("payment",{}).get("entity",{});order_no=(p.get("notes") or {}).get("dreamarts_order")
+  if order_no:supabase_request("orders?order_number=eq."+order_no,method="PATCH",body={"status":"PAID","admin_notes":"Razorpay webhook captured: "+p.get("id","")},prefer="return=representation")
+ return "ok",200
 
 @app.patch("/api/my-orders/<order_id>/customer-approve")
 def customer_approve_order(order_id):
