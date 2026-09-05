@@ -88,6 +88,9 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     # Preview remains bounded for Render Free, but optimizer reports actual optimum.
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
+    if engine=="multiresolution":
+        _,importance,mask,coarse,medium=_multires_target(image_data,shape,size,float(contrast))
+        target=0.35*coarse+0.35*medium+0.30*target
     if engine=="public_precalc_greedy": importance=np.where(mask,0.65*target+0.35*importance,0).astype(np.float32)
     elif engine=="adaptive_coverage": importance=np.where(mask,0.55*target+0.45*importance,0).astype(np.float32)
     elif engine=="exploration_greedy": importance=np.where(mask,0.70*target+0.30*importance,0).astype(np.float32)
@@ -166,6 +169,13 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     }
 
 
+def _multires_target(image_data, shape, size, contrast):
+    target, importance, mask = _prepare(image_data,size,shape,float(contrast))
+    # Coarse-to-fine pyramid: silhouette first, then detail.
+    coarse=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(24,size//4),max(24,size//4)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
+    medium=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(48,size//2),max(48,size//2)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
+    return target, importance, mask, coarse, medium
+
 def _quality_score(result):
     st=result["stats"]
     # Combined selector: reconstruction error + efficiency + density safety.
@@ -178,7 +188,7 @@ def _quality_score(result):
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
     candidates=[]
-    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy"):
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy","multiresolution"):
         try:
             r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
             candidates.append(r)
