@@ -176,6 +176,17 @@ def _multires_target(image_data, shape, size, contrast):
     medium=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(48,size//2),max(48,size//2)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
     return target, importance, mask, coarse, medium
 
+def _perceptual_quality(result):
+    st=result["stats"]
+    mse=float(st.get("mse",1))
+    used=max(1,int(st.get("generated_lines",1)))
+    req=max(1,int(st.get("requested_lines",used)))
+    # Proxy human-quality score: accuracy, useful-path efficiency and saturation safety.
+    accuracy=max(0.0,1.0-min(1.0,mse*12.0))
+    efficiency=min(1.0,used/req)
+    density_safety=1.0-min(0.45,max(0.0,efficiency-0.85)*1.8)
+    return round(0.68*accuracy+0.18*efficiency+0.14*density_safety,6)
+
 def _quality_score(result):
     st=result["stats"]
     # Combined selector: reconstruction error + efficiency + density safety.
@@ -183,7 +194,7 @@ def _quality_score(result):
     used=max(1,int(st.get("generated_lines",1)))
     req=max(1,int(st.get("requested_lines",used)))
     efficiency=used/req
-    return mse + 0.0015*max(0,efficiency-0.92)
+    return mse + 0.0015*max(0,efficiency-0.92) - 0.0008*_perceptual_quality(result)
 
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
@@ -196,5 +207,6 @@ def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, t
             pass
     if not candidates: raise RuntimeError("No generation engine completed")
     # Lower residual MSE wins; future adapters can add perceptual scoring.
+    scored=[{"engine":r["engine"],**r["stats"],"quality_score":_perceptual_quality(r)} for r in candidates]
     best=min(candidates,key=_quality_score)
-    return best, [{"engine":r["engine"],**r["stats"]} for r in candidates]
+    return best, sorted(scored,key=lambda x:x["quality_score"],reverse=True)
