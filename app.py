@@ -173,7 +173,11 @@ def studio_generate():
   b=request.get_json(silent=True) or {}
   image=b.get("image")
   if not image: return jsonify(error="Studio image is required."),400
+  focus=b.get("focus","Auto Select")
   engine_mode=b.get("engine","auto")
+  if focus=="Full Image": engine_mode="dreamarts_adaptive"
+  elif focus=="Portrait Focus": engine_mode="portrait_aware"
+  elif focus=="Subject Only": engine_mode="subject_focus"
   if engine_mode=="auto":
    result, benchmark_results=benchmark_string_art(image, b.get("shape","Circle"), b.get("nails",600), b.get("lines",4000), float(b.get("contrast",90))/100.0, b.get("tone","black"))
    result["benchmark"]=benchmark_results
