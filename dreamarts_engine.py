@@ -73,13 +73,16 @@ def _line_pixels(a,b,size,mask):
     valid=mask[ys,xs]
     return ys[valid],xs[valid]
 
-def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black", preview=True):
+def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black", preview=True, engine="dreamarts_adaptive"):
+    """Engine adapter entrypoint. engine: dreamarts_adaptive, residual_greedy, edge_weighted."""
     size=180 if preview else 320
     nails=max(100,min(int(nails),1200))
     requested=max(500,min(int(lines),10000))
     # Preview remains bounded for Render Free, but optimizer reports actual optimum.
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
+    if engine=="residual_greedy": importance=np.where(mask,target,0).astype(np.float32)
+    elif engine=="edge_weighted": importance=np.where(mask,0.45*target+0.55*importance,0).astype(np.float32)
     pts=_shape_points(shape,nails)
     coverage=np.zeros_like(target)
     current=0; sequence=[]; cache={}
@@ -139,7 +142,23 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     bio=BytesIO(); out.save(bio,format="PNG",optimize=True)
     mse=float(np.mean((target[mask]-coverage[mask])**2))
     return {
+        "engine":engine,
         "preview":"data:image/png;base64,"+base64.b64encode(bio.getvalue()).decode(),
         "sequence":sequence,
         "stats":{"requested_lines":requested,"generated_lines":len(sequence),"nails":nails,"mse":round(mse,5),"quality":"adaptive-density-governed"}
     }
+
+
+def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
+    """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
+    candidates=[]
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted"):
+        try:
+            r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
+            candidates.append(r)
+        except Exception:
+            pass
+    if not candidates: raise RuntimeError("No generation engine completed")
+    # Lower residual MSE wins; future adapters can add perceptual scoring.
+    best=min(candidates,key=lambda r:r["stats"]["mse"])
+    return best, [{"engine":r["engine"],**r["stats"]} for r in candidates]
