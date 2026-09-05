@@ -89,6 +89,11 @@ def my_notifications():
  token=auth.split(" ",1)[1]
  return jsonify(supabase_request("notifications?select=*&order=created_at.desc&limit=30",token=token))
 
+def create_order_notification(token,order_number,title,message,kind="order_update"):
+ rows=supabase_request("orders?order_number=eq."+order_number+"&select=user_id",token=token)
+ if isinstance(rows,list) and rows and rows[0].get("user_id"):
+  return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
+
 @app.get("/api/admin/production")
 def production_queue():
  auth=request.headers.get("Authorization","")
@@ -105,6 +110,12 @@ def production_update(order_number):
  if not patch:return jsonify(error="Nothing to update."),400
  r=supabase_request("orders?order_number=eq."+order_number,method="PATCH",body=patch,token=auth.split(" ",1)[1],prefer="return=representation")
  if isinstance(r,dict) and "_error" in r:return jsonify(error="Production update failed.",details=r["_error"]),400
+ status=patch.get("status")
+ notices={"IN_PRODUCTION":("Your artwork is now in production","Our makers have started creating your Dreamarts artwork."),"QUALITY_CHECK":("Your artwork is in quality inspection","Your finished artwork is being checked before shipping."),"SHIPPED":("Your order has been shipped","Your Dreamarts artwork is with the courier."),"DELIVERED":("Your order has been delivered","We hope you love your Dreamarts artwork!")}
+ if status in notices:
+  title,msg=notices[status]
+  if status=="SHIPPED" and patch.get("tracking_number"):msg+=" Tracking number: "+patch["tracking_number"]
+  create_order_notification(token,order_number,title,msg,"shipping" if status=="SHIPPED" else "production")
  return jsonify(ok=True)
 
 @app.get("/api/admin/orders")
