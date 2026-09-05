@@ -3,7 +3,7 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
 import os,json,uuid,time
-from dreamarts_engine import generate as generate_string_art
+from dreamarts_engine import generate as generate_string_art, benchmark as benchmark_string_art
 
 BASE=os.path.dirname(__file__)
 DATA=os.path.join(BASE,"data"); UP=os.path.join(BASE,"uploads")
@@ -173,15 +173,20 @@ def studio_generate():
   b=request.get_json(silent=True) or {}
   image=b.get("image")
   if not image: return jsonify(error="Studio image is required."),400
-  result=generate_string_art(
+  engine_mode=b.get("engine","auto")
+  if engine_mode=="auto":
+   result, benchmark_results=benchmark_string_art(image, b.get("shape","Circle"), b.get("nails",600), b.get("lines",4000), float(b.get("contrast",90))/100.0, b.get("tone","black"))
+   result["benchmark"]=benchmark_results
+  else:
+   result=generate_string_art(
    image_data=image,
    shape=b.get("shape","Circle"),
    nails=b.get("nails",600),
    lines=b.get("lines",4000),
    contrast=float(b.get("contrast",90))/100.0,
    tone=b.get("tone","black"),
-   preview=True
-  )
+   preview=True, engine=engine_mode
+   )
   return jsonify(ok=True,**result)
  except Exception as e:
   return jsonify(error="Preview generation failed: "+str(e)),500
