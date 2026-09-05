@@ -88,6 +88,10 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     # Preview remains bounded for Render Free, but optimizer reports actual optimum.
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
+    portrait_map=_portrait_importance(image_data,size,shape)
+    # Preserve the main portrait/silhouette without making the optimizer face-only.
+    importance=np.where(mask,np.clip(importance*(1+0.45*portrait_map),0,1),0)
+    if engine=="portrait_aware": importance=np.where(mask,np.clip(0.45*importance+0.55*portrait_map,0,1),0)
     if engine=="multiresolution":
         _,importance,mask,coarse,medium=_multires_target(image_data,shape,size,float(contrast))
         target=0.35*coarse+0.35*medium+0.30*target
@@ -177,6 +181,20 @@ def _multires_target(image_data, shape, size, contrast):
     medium=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(48,size//2),max(48,size//2)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
     return target, importance, mask, coarse, medium
 
+def _portrait_importance(image_data, size, shape):
+    """Lightweight portrait-aware saliency without a heavyweight ML dependency."""
+    im=_decode(image_data)
+    im=ImageOps.fit(im,(size,size),method=Image.Resampling.LANCZOS)
+    arr=np.asarray(im,dtype=np.float32)/255.0
+    r,g,b=arr[:,:,0],arr[:,:,1],arr[:,:,2]
+    # Broad skin-tone likelihood; intentionally soft because portraits vary widely.
+    skin=((r>0.20)&(g>0.08)&(b>0.03)&((r-g)>-0.08)&((r-b)>0.02)).astype(np.float32)
+    skin=np.asarray(Image.fromarray((skin*255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(max(3,size//18))),dtype=np.float32)/255.0
+    yy,xx=np.mgrid[0:size,0:size]
+    # Portrait composition prior: subjects commonly occupy the central field.
+    center=np.exp(-(((xx-size*.5)/(size*.32))**2+((yy-size*.48)/(size*.38))**2))
+    return np.clip(.55*center+.45*skin,0,1)
+
 def _visual_similarity_metrics(target, coverage, mask):
     """Perceptual proxy: compare coarse structure, edges and density distribution."""
     t=target[mask]; c=coverage[mask]
@@ -214,7 +232,7 @@ def _quality_score(result):
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
     candidates=[]
-    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy","multiresolution"):
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy","adaptive_coverage","exploration_greedy","multiresolution","portrait_aware"):
         try:
             r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
             candidates.append(r)
