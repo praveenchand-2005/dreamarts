@@ -82,6 +82,24 @@ def custom_order():
   return jsonify(ok=True,orderNumber=oid,status=order["status"],trackUrl="/track?order="+oid)
  except Exception as e: return jsonify(error="Could not create request: "+str(e)),500
 
+@app.get("/api/admin/production")
+def production_queue():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(supabase_request("orders?select=*&status=in.(PAID,IN_PRODUCTION,QUALITY_CHECK,SHIPPED)&order=created_at.asc",token=auth.split(" ",1)[1]))
+
+@app.patch("/api/admin/production/<order_number>")
+def production_update(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ allowed={"status","tracking_number","courier","admin_notes"}
+ patch={k:v for k,v in b.items() if k in allowed}
+ if not patch:return jsonify(error="Nothing to update."),400
+ r=supabase_request("orders?order_number=eq."+order_number,method="PATCH",body=patch,token=auth.split(" ",1)[1],prefer="return=representation")
+ if isinstance(r,dict) and "_error" in r:return jsonify(error="Production update failed.",details=r["_error"]),400
+ return jsonify(ok=True)
+
 @app.get("/api/admin/orders")
 def admin_orders():
  auth=request.headers.get("Authorization","")
