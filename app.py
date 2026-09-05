@@ -3,6 +3,7 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
 import os,json,uuid,time
+from dreamarts_engine import generate as generate_string_art
 
 BASE=os.path.dirname(__file__)
 DATA=os.path.join(BASE,"data"); UP=os.path.join(BASE,"uploads")
@@ -165,6 +166,25 @@ def create_my_order_with_photo():
  if isinstance(file_result,dict) and "_error" in file_result:
   return jsonify(error="Order created but photo metadata could not be linked.",details=file_result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="NEW_REQUEST",photoPath=storage_path)
+
+@app.post("/api/studio/generate")
+def studio_generate():
+ try:
+  b=request.get_json(silent=True) or {}
+  image=b.get("image")
+  if not image: return jsonify(error="Studio image is required."),400
+  result=generate_string_art(
+   image_data=image,
+   shape=b.get("shape","Circle"),
+   nails=b.get("nails",600),
+   lines=b.get("lines",4000),
+   contrast=float(b.get("contrast",90))/100.0,
+   tone=b.get("tone","black"),
+   preview=True
+  )
+  return jsonify(ok=True,**result)
+ except Exception as e:
+  return jsonify(error="Preview generation failed: "+str(e)),500
 
 @app.get("/api/public-config")
 def public_config():
