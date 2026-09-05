@@ -73,6 +73,25 @@ def custom_order():
   return jsonify(ok=True,orderNumber=oid,status=order["status"],trackUrl="/track?order="+oid)
  except Exception as e: return jsonify(error="Could not create request: "+str(e)),500
 
+@app.get("/api/admin/orders")
+def admin_orders():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ return jsonify(supabase_request("orders?select=*&order=created_at.desc",token=token))
+
+@app.patch("/api/admin/orders/<order_number>")
+def admin_update_order(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ allowed={"status","price","shipping_cost","admin_notes"}
+ patch={k:v for k,v in b.items() if k in allowed}
+ if not patch:return jsonify(error="Nothing to update."),400
+ result=supabase_request("orders?order_number=eq."+order_number,method="PATCH",body=patch,token=token,prefer="return=representation")
+ if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not update order.",details=result["_error"]),400
+ return jsonify(ok=True,order=result[0] if isinstance(result,list) and result else None)
+
 @app.get("/api/orders")
 def orders(): return jsonify(load_orders())
 
