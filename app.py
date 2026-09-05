@@ -155,6 +155,22 @@ def update_order(order_id):
   o["shipping"].update({k:v for k,v in body["shipping"].items() if k in {"carrier","trackingNumber","trackingUrl"}})
  o["updatedAt"]=now;save_json(p,o);return jsonify(o)
 
+def order_timeline(status):
+ stages=["AWAITING_APPROVAL","QUOTE_SENT","PAYMENT_PENDING","PAID","IN_PRODUCTION","QUALITY_CHECK","SHIPPED","DELIVERED"]
+ labels={"AWAITING_APPROVAL":"Design submitted","QUOTE_SENT":"Quote ready","PAYMENT_PENDING":"Awaiting payment","PAID":"Payment confirmed","IN_PRODUCTION":"Artwork in production","QUALITY_CHECK":"Quality inspection","SHIPPED":"Handed to courier","DELIVERED":"Delivered"}
+ if status=="CANCELLED":return [{"status":"CANCELLED","label":"Order cancelled","done":True}]
+ idx=stages.index(status) if status in stages else 0
+ return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
+
+@app.get("/api/my-orders/<order_number>/tracking")
+def customer_tracking(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ rows=supabase_request("orders?order_number=eq."+order_number+"&select=*",token=auth.split(" ",1)[1])
+ if not isinstance(rows,list) or not rows:return jsonify(error="Order not found."),404
+ o=rows[0]
+ return jsonify(order_number=o.get("order_number"),status=o.get("status"),courier=o.get("courier"),tracking_number=o.get("tracking_number"),timeline=order_timeline(o.get("status")))
+
 @app.get("/api/my-orders")
 def my_orders():
  auth=request.headers.get("Authorization","")
