@@ -161,11 +161,12 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     # encode
     bio=BytesIO(); out.save(bio,format="PNG",optimize=True)
     mse=float(np.mean((target[mask]-coverage[mask])**2))
+    visual=_visual_similarity_metrics(target,coverage,mask)
     return {
         "engine":engine,
         "preview":"data:image/png;base64,"+base64.b64encode(bio.getvalue()).decode(),
         "sequence":sequence,
-        "stats":{"requested_lines":requested,"generated_lines":len(sequence),"nails":nails,"mse":round(mse,5),"quality":"adaptive-density-governed"}
+        "stats":{"requested_lines":requested,"generated_lines":len(sequence),"nails":nails,"mse":round(mse,5),"quality":"adaptive-density-governed","visual_metrics":visual}
     }
 
 
@@ -176,6 +177,18 @@ def _multires_target(image_data, shape, size, contrast):
     medium=np.asarray(Image.fromarray((target*255).astype(np.uint8)).resize((max(48,size//2),max(48,size//2)),Image.Resampling.LANCZOS).resize((size,size),Image.Resampling.BILINEAR),dtype=np.float32)/255.0
     return target, importance, mask, coarse, medium
 
+def _visual_similarity_metrics(target, coverage, mask):
+    """Perceptual proxy: compare coarse structure, edges and density distribution."""
+    t=target[mask]; c=coverage[mask]
+    if len(t)<2: return {"tone":0.0,"structure":0.0,"density":0.0}
+    tone=max(0.0,1.0-float(np.mean(np.abs(t-c))))
+    # Downsample-like gradient comparison.
+    gy_t,gx_t=np.gradient(target); gy_c,gx_c=np.gradient(coverage)
+    et=np.sqrt(gx_t*gx_t+gy_t*gy_t); ec=np.sqrt(gx_c*gx_c+gy_c*gy_c)
+    structure=max(0.0,1.0-float(np.mean(np.abs(et[mask]-ec[mask]))))
+    density=max(0.0,1.0-abs(float(t.mean())-float(c.mean())))
+    return {"tone":round(tone,5),"structure":round(structure,5),"density":round(density,5)}
+
 def _perceptual_quality(result):
     st=result["stats"]
     mse=float(st.get("mse",1))
@@ -183,9 +196,11 @@ def _perceptual_quality(result):
     req=max(1,int(st.get("requested_lines",used)))
     # Proxy human-quality score: accuracy, useful-path efficiency and saturation safety.
     accuracy=max(0.0,1.0-min(1.0,mse*12.0))
+    vm=st.get("visual_metrics",{})
+    visual=(float(vm.get("tone",accuracy))+float(vm.get("structure",accuracy))+float(vm.get("density",accuracy)))/3
     efficiency=min(1.0,used/req)
     density_safety=1.0-min(0.45,max(0.0,efficiency-0.85)*1.8)
-    return round(0.68*accuracy+0.18*efficiency+0.14*density_safety,6)
+    return round(0.48*accuracy+0.30*visual+0.10*efficiency+0.12*density_safety,6)
 
 def _quality_score(result):
     st=result["stats"]
