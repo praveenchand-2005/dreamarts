@@ -73,6 +73,13 @@ def _line_pixels(a,b,size,mask):
     valid=mask[ys,xs]
     return ys[valid],xs[valid]
 
+LINE_CACHE = {}
+
+def _cached_line(a_idx,b_idx,pts,size,mask):
+    key=(len(pts),size,a_idx,b_idx) if a_idx<b_idx else (len(pts),size,b_idx,a_idx)
+    if key not in LINE_CACHE: LINE_CACHE[key]=_line_pixels(pts[a_idx],pts[b_idx],size,mask)
+    return LINE_CACHE[key]
+
 def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black", preview=True, engine="dreamarts_adaptive"):
     """Engine adapter entrypoint. engine: dreamarts_adaptive, residual_greedy, edge_weighted."""
     size=180 if preview else 320
@@ -81,6 +88,7 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
     # Preview remains bounded for Render Free, but optimizer reports actual optimum.
     max_lines=min(requested,3200 if preview else requested)
     target,importance,mask=_prepare(image_data,size,shape,float(contrast))
+    if engine=="public_precalc_greedy": importance=np.where(mask,0.65*target+0.35*importance,0).astype(np.float32)
     if engine=="residual_greedy": importance=np.where(mask,target,0).astype(np.float32)
     elif engine=="edge_weighted": importance=np.where(mask,0.45*target+0.55*importance,0).astype(np.float32)
     pts=_shape_points(shape,nails)
@@ -100,7 +108,7 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
             key=(current,int(cand))
             ys,xs=cache.get(key,(None,None))
             if ys is None:
-                ys,xs=_line_pixels(pts[current],pts[int(cand)],size,mask); cache[key]=(ys,xs)
+                ys,xs=_cached_line(current,int(cand),pts,size,mask); cache[key]=(ys,xs)
             if len(xs)<4: continue
             residual=target[ys,xs]-coverage[ys,xs]
             gain=np.maximum(residual,0)*importance[ys,xs]
@@ -108,6 +116,9 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
             # Density governor + anti-black-spot + mild exploration.
             score=float(gain.mean()-1.8*over.mean()-0.22*coverage[ys,xs].mean())
             if len(sequence)>2 and cand==sequence[-2][0]: score-=0.12
+            # Public-engine-inspired recency buffer: discourage recently visited nails.
+            recent=[z for pair in sequence[-18:] for z in pair]
+            if int(cand) in recent: score-=0.045
             if score>best_score: best_score=score; best=(int(cand),ys,xs)
         if best is None or best_score<0.002:
             no_gain+=1
@@ -152,7 +163,7 @@ def generate(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, to
 def benchmark(image_data, shape="Circle", nails=600, lines=4000, contrast=0.9, tone="black"):
     """Run independent Dreamarts adapters and choose the lowest reconstruction error."""
     candidates=[]
-    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted"):
+    for name in ("dreamarts_adaptive","residual_greedy","edge_weighted","public_precalc_greedy"):
         try:
             r=generate(image_data,shape,nails,lines,contrast,tone,True,name)
             candidates.append(r)
