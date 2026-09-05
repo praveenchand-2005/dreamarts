@@ -2,7 +2,7 @@
 const imgData=sessionStorage.getItem('dreamarts_studio_image'),cfg=JSON.parse(sessionStorage.getItem('dreamarts_studio_config')||'null');
 if(!imgData||!cfg)location.href='/#custom';
 const c=document.getElementById('art'),x=c.getContext('2d'),originalImg=new Image();
-let shape=cfg.shape==='Recommend'?'Circle':cfg.shape||'Circle',tone='black',previewData=null,busy=false,stats=null;
+let shape=cfg.shape==='Recommend'?'Circle':cfg.shape||'Circle',tone='black',focus='Auto Select',previewData=null,busy=false,stats=null;
 const nails=document.getElementById('nails'),lines=document.getElementById('lines'),contrast=document.getElementById('contrast');
 nails.value=cfg.anchor_nails||600; lines.value=cfg.string_lines||4000;
 function meta(){
@@ -18,7 +18,7 @@ async function generate(){
  if(busy)return; busy=true; document.getElementById('engine').textContent='DREAMARTS ENGINE V2 · ANALYSING';
  document.getElementById('studioNotice').textContent='Optimizing thread paths and controlling density…';
  try{
-  const r=await fetch('/api/studio/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:imgData,shape,nails:+nails.value,lines:+lines.value,contrast:+contrast.value,tone})});
+  const r=await fetch('/api/studio/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:imgData,shape,nails:+nails.value,lines:+lines.value,contrast:+contrast.value,tone,focus})});
   const d=await r.json(); if(!r.ok)throw new Error(d.error||'Generation failed');
   previewData=d.preview;stats=d.stats;paint(previewData);if(d.benchmark){const winner=d.engine;const rank=d.benchmark.map((q,i)=>'#'+(i+1)+' '+q.engine+' '+Math.round(q.quality_score*100)+'%').join(' · ');document.getElementById('studioNotice').textContent='Engine judge selected '+winner+'. '+rank;}
   document.getElementById('engine').textContent='PREVIEW READY · '+d.stats.generated_lines+' OPTIMIZED PATHS';
@@ -27,10 +27,11 @@ async function generate(){
  busy=false;
 }
 document.querySelectorAll('#shapes button').forEach(b=>b.onclick=()=>{shape=b.textContent;document.querySelectorAll('#shapes button').forEach(q=>q.classList.toggle('active',q===b));meta();generate()});
+document.querySelectorAll('#focuses button').forEach(b=>b.onclick=()=>{focus=b.textContent;document.querySelectorAll('#focuses button').forEach(q=>q.classList.toggle('active',q===b));document.getElementById('focusVal').textContent=focus;generate()});
 document.querySelectorAll('#tones button').forEach(b=>b.onclick=()=>{tone=b.dataset.v;document.querySelectorAll('#tones button').forEach(q=>q.classList.toggle('active',q===b));generate()});
 [nails,lines,contrast].forEach(e=>e.onchange=()=>{meta();generate()});
 document.getElementById('regen').onclick=generate;
 document.getElementById('compare').onclick=()=>{const original=document.getElementById('compare').dataset.original==='1';if(original){paint(previewData);document.getElementById('compare').dataset.original='0';document.getElementById('compare').textContent='Original photo';document.getElementById('engine').textContent='PREVIEW READY'}else{paint(imgData);document.getElementById('compare').dataset.original='1';document.getElementById('compare').textContent='Back to string art';document.getElementById('engine').textContent='ORIGINAL REFERENCE'}};
-document.getElementById('confirm').onclick=()=>{if(!previewData)return;cfg.shape=shape;cfg.anchor_nails=+nails.value;cfg.string_lines=stats?.generated_lines||+lines.value;cfg.thread_tone=tone;sessionStorage.setItem('dreamarts_studio_config',JSON.stringify(cfg));sessionStorage.setItem('dreamarts_selected_preview',previewData);location.href='/#custom'};
+document.getElementById('confirm').onclick=()=>{if(!previewData)return;cfg.shape=shape;cfg.anchor_nails=+nails.value;cfg.string_lines=stats?.generated_lines||+lines.value;cfg.thread_tone=tone;cfg.artwork_focus=focus;sessionStorage.setItem('dreamarts_studio_config',JSON.stringify(cfg));sessionStorage.setItem('dreamarts_selected_preview',previewData);location.href='/#custom'};
 originalImg.onload=()=>{meta();document.querySelectorAll('#shapes button').forEach(b=>b.classList.toggle('active',b.textContent===shape));document.querySelector('#tones button').classList.add('active');generate()};originalImg.src=imgData;
 </script></body></html>
