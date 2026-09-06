@@ -777,6 +777,45 @@ def execution_audit_detail(task_id):
    except:parsed[k]=raw
  return jsonify(ok=True,task_id=task_id,audit=parsed)
 
+AGENT_AUTONOMY_LEVELS={"L0":{"name":"Observe","max_risk":"NONE"},"L1":{"name":"Analyze","max_risk":"NONE"},"L2":{"name":"Recommend","max_risk":"NONE"},"L3":{"name":"Low-risk autonomous execution","max_risk":"LOW"},"L4":{"name":"Policy-controlled execution","max_risk":"MEDIUM"},"L5":{"name":"Strategic execution with founder approval","max_risk":"HIGH"}}
+RISK_RANK={"NONE":0,"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}
+
+@app.get("/api/admin/agent-autonomy")
+def agent_autonomy():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?select=agent,autonomy_level,outcome_learning&limit=5000",token=token);rows=rows if isinstance(rows,list) else []
+ agents={}
+ for r in rows:
+  ag=r.get("agent")
+  if not ag:continue
+  agents.setdefault(ag,{"level":r.get("autonomy_level") or "L2","scores":[]})
+  raw=r.get("outcome_learning")
+  if raw:
+   try:e=json.loads(raw) if isinstance(raw,str) else raw;agents[ag]["scores"].append(e.get("outcome_score",50))
+   except:pass
+ result=[]
+ for ag,v in agents.items():
+  trust=round(sum(v["scores"][-10:])/len(v["scores"][-10:]),1) if v["scores"] else None
+  result.append({"agent":ag,"level":v["level"],"policy":AGENT_AUTONOMY_LEVELS.get(v["level"],AGENT_AUTONOMY_LEVELS["L2"]),"outcome_trust":trust})
+ return jsonify(ok=True,levels=AGENT_AUTONOMY_LEVELS,agents=result)
+
+@app.post("/api/admin/agent-tasks/<task_id>/autonomy-execute")
+def autonomy_execute(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};action_type=body.get("action_type");payload=body.get("payload",{})
+ rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ agent=task.get("agent");level=task.get("autonomy_level") or "L2";spec=EXECUTION_ACTION_REGISTRY.get(agent,{}).get(action_type)
+ if not spec:return jsonify(error="Action not permitted for agent"),403
+ allowed=RISK_RANK.get(spec["risk"],9)<=RISK_RANK.get(AGENT_AUTONOMY_LEVELS[level]["max_risk"],-1)
+ if not allowed:return jsonify(error="Autonomy level requires founder authorization for this action",level=level,risk=spec["risk"]),403
+ task["status"]="EXECUTION_AUTHORIZED"
+ now=datetime.datetime.utcnow().isoformat()+"Z"
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTION_AUTHORIZED","execution_authorization":json.dumps({"authorized_by":"AUTONOMY_POLICY","level":level,"action_type":action_type,"authorized_at":now})},token=token)
+ return execute_real_registered_action(task_id)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
