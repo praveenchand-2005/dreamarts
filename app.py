@@ -560,6 +560,24 @@ def recommend_from_investigation(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"RECOMMENDED","recommendation":json.dumps(recommendation),"updated_at":recommendation["generated_at"]},token=token)
  return jsonify(ok=True,task_id=task_id,recommendation=recommendation)
 
+@app.post("/api/admin/business-intelligence/run")
+def run_business_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];resp=business_anomalies_api();data=resp.get_json() if hasattr(resp,"get_json") else {};anomalies=data.get("anomalies",[])
+ mapping={"ORDER_VOLUME_DROP":"Sales Intelligence Agent","REVENUE_DROP":"Finance Intelligence Agent","ORDER_AGING":"Operations Agent"};results=[]
+ for x in anomalies:
+  agent=mapping.get(x.get("type"),"Operations Agent");now=datetime.datetime.utcnow().isoformat()+"Z"
+  task={"agent":agent,"title":"Investigate "+x.get("type","BUSINESS_ANOMALY").replace("_"," ").title(),"description":x.get("message"),"priority":x.get("severity","MEDIUM"),"status":"RECOMMENDED","source":"BUSINESS_ANOMALY","created_at":now,"updated_at":now}
+  orders=supabase_request("orders?select=status,amount,price,payment_status&limit=3000",token=token);orders=orders if isinstance(orders,list) else []
+  paid=sum(1 for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"));revenue=sum(float(o.get("amount") or o.get("price") or 0) for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"))
+  typ=x.get("type","");actions={"ORDER_AGING":"Review and assign the oldest open orders immediately.","REVENUE_DROP":"Review conversion, payments and recent sales changes.","ORDER_VOLUME_DROP":"Investigate acquisition sources and conversion funnel changes."}
+  report={"business_snapshot":{"total_orders":len(orders),"paid_orders":paid,"paid_revenue":round(revenue,2)},"probable_causes":[x.get("message")],"confidence":0.72}
+  rec={"action":actions.get(typ,"Review business anomaly."),"expected_impact":"High business impact" if x.get("severity")=="HIGH" else "Moderate business impact","risk_level":x.get("severity"),"confidence":0.72,"requires_founder_decision":True,"generated_at":now}
+  task["investigation_report"]=json.dumps(report);task["recommendation"]=json.dumps(rec)
+  r=supabase_request("agent_tasks",method="POST",body=task,token=token);results.append({"anomaly":typ,"agent":agent,"created":bool(r)})
+ return jsonify(ok=True,anomalies_detected=len(anomalies),recommendations_created=len(results),results=results)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
