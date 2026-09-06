@@ -244,6 +244,22 @@ def founder_briefing_api():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,briefing=founder_briefing(auth.split(" ",1)[1]))
 
+def decision_learning(token):
+ rows=supabase_request("agent_tasks?select=agent,priority,status,title,proposed_action,updated_at&limit=1000",token=token);rows=rows if isinstance(rows,list) else []
+ agents={}
+ for x in rows:
+  name=x.get("agent","Unknown Agent");m=agents.setdefault(name,{"total":0,"executed":0,"pending":0,"high_priority":0})
+  m["total"]+=1;m["executed"]+=x.get("status")=="EXECUTED";m["pending"]+=x.get("status")=="PENDING";m["high_priority"]+=x.get("priority") in ("HIGH","CRITICAL")
+ for m in agents.values():m["execution_rate"]=round(m["executed"]/m["total"]*100,1) if m["total"] else 0
+ return agents
+
+@app.get("/api/admin/decision-learning")
+def decision_learning_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ data=decision_learning(auth.split(" ",1)[1])
+ return jsonify(ok=True,learning=data,insight="Agent execution patterns are used to identify recurring workload and prioritization gaps.")
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
