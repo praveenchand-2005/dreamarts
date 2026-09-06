@@ -1643,6 +1643,44 @@ def record_ai_execution_outcome(execution_id):
  b=request.get_json(silent=True) or {};x["outcome"]={"result":b.get("result"),"metrics":b.get("metrics") or {},"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"};x["status"]="OUTCOME_RECORDED"
  return jsonify(ok=True,execution=x)
 
+AI_LEARNING_MEMORY=[]
+
+@app.post("/api/admin/ai/executions/<execution_id>/learn")
+def learn_from_ai_execution(execution_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ x=next((e for e in AI_EXECUTION_LOG if e["id"]==execution_id),None)
+ if not x:return jsonify(error="execution not found"),404
+ if x.get("status")!="OUTCOME_RECORDED":return jsonify(error="outcome must be recorded before learning"),409
+ if x.get("learning_id"):return jsonify(ok=True,learning=next((l for l in AI_LEARNING_MEMORY if l["id"]==x["learning_id"]),None),already_learned=True)
+ outcome=x.get("outcome") or {};metrics=outcome.get("metrics") or {};result=str(outcome.get("result") or "")
+ lesson="Execution outcome recorded; future decisions should consider this action and measured result."
+ if any(v is not None and isinstance(v,(int,float)) and v<0 for v in metrics.values()):lesson="Negative measurable outcome detected; reduce confidence in similar future actions unless new evidence contradicts it."
+ elif result:lesson="Observed outcome: "+result[:500]
+ lid="learn_"+uuid.uuid4().hex[:12];learning={"id":lid,"execution_id":execution_id,"recommendation_id":x.get("recommendation_id"),"action":x.get("action"),"lesson":lesson,"outcome":outcome,"created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ AI_LEARNING_MEMORY.append(learning);x["learning_id"]=lid;x["status"]="LEARNED"
+ return jsonify(ok=True,learning=learning)
+
+@app.get("/api/admin/ai/memory/learning")
+def ai_learning_memory():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,count=len(AI_LEARNING_MEMORY),memories=AI_LEARNING_MEMORY)
+
+@app.post("/api/admin/ai/memory/recall")
+def recall_ai_learning():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};query=str(b.get("query","")).lower()
+ matches=[m for m in AI_LEARNING_MEMORY if not query or query in (str(m.get("action",""))+" "+str(m.get("lesson",""))+" "+str(m.get("outcome",""))).lower()]
+ return jsonify(ok=True,count=len(matches),recalled=matches[:20],instruction="Use recalled outcomes as historical evidence, not deterministic truth.")
+
+@app.get("/api/admin/ai/learning/summary")
+def ai_learning_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,total_lessons=len(AI_LEARNING_MEMORY),executions_with_outcomes=sum(1 for x in AI_EXECUTION_LOG if x.get("outcome")),learning_loop_status="ACTIVE")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
