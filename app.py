@@ -950,6 +950,23 @@ def deliberate_with_memory():
  council={"topic":topic,"participants":agents,"historical_memories":hist,"evidence":evidence,"investigations":investigations,"consensus_confidence":round(sum(x["confidence"] for x in investigations)/len(investigations),1) if investigations else 0,"recommendation":"Use current evidence while explicitly incorporating lessons from similar historical decisions.","created_at":datetime.datetime.utcnow().isoformat()+"Z"}
  return jsonify(ok=True,council=council)
 
+@app.post("/api/admin/strategy/scenario-simulate")
+def strategy_scenario_simulate():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {}
+ topic=body.get("topic","Strategic decision");scenarios=body.get("scenarios") or []
+ if not scenarios:return jsonify(error="At least one scenario is required"),400
+ results=[]
+ for i,s in enumerate(scenarios):
+  name=s.get("name") or ("Option "+chr(65+i));impact=s.get("impact") or {}
+  revenue=float(impact.get("revenue",0));profit=float(impact.get("profit",0));operations=float(impact.get("operations",0));risk=float(s.get("risk",50));confidence=float(s.get("confidence",60))
+  historical=float(s.get("historical_similarity",0));score=round(revenue*.28+profit*.32+operations*.15+(100-risk)*.15+confidence*.07+historical*.03,2)
+  results.append({"name":name,"description":s.get("description",""),"estimated_revenue_impact":revenue,"estimated_profit_impact":profit,"operational_feasibility":operations,"risk":risk,"confidence":confidence,"historical_similarity":historical,"strategic_score":score})
+ results.sort(key=lambda x:x["strategic_score"],reverse=True)
+ for rank,x in enumerate(results,1):x["rank"]=rank
+ return jsonify(ok=True,topic=topic,scenarios=results,recommended=results[0],simulation_note="Decision-support model; estimates require real evidence and founder validation.",created_at=datetime.datetime.utcnow().isoformat()+"Z")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
