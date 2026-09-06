@@ -1,0 +1,17 @@
+name: Dreamarts AI Workforce Monitor
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run AI workforce scan
+        env:
+          DREAMARTS_AGENT_URL: ${{ secrets.DREAMARTS_AGENT_URL }}
+          DREAMARTS_AGENT_TOKEN: ${{ secrets.DREAMARTS_AGENT_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -X POST "$DREAMARTS_AGENT_URL" \
+            -H "Authorization: Bearer $DREAMARTS_AGENT_TOKEN" \
+            -H "Content-Type: application/json"
