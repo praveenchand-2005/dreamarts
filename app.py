@@ -850,6 +850,32 @@ def review_agent_autonomy():
    changes.append({"agent":ag,"previous_level":g["level"],"new_level":new,"outcome_trust":trust,"reason":"Outcome-driven autonomy policy"})
  return jsonify(ok=True,reviewed=len(grouped),changes=changes,reviewed_at=now)
 
+@app.post("/api/admin/agent-council/deliberate")
+def agent_council_deliberate():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {}
+ topic=body.get("topic","Business decision review");agents=body.get("agents") or ["Sales Intelligence Agent","Finance Intelligence Agent","Operations Agent"]
+ context=body.get("context",{})
+ views=[]
+ for agent in agents:
+  focus="revenue and customer impact" if "Sales" in agent else "profit, cash and financial risk" if "Finance" in agent else "execution feasibility and operational risk"
+  views.append({"agent":agent,"position":"Analyze "+topic+" from "+focus,"confidence":70,"focus":focus})
+ disagreements=[]
+ if len(views)>1:disagreements=[{"issue":"Primary success metric","agents":agents,"resolution":"Balance growth, profitability and operational feasibility"}]
+ decision={"topic":topic,"participants":agents,"context":context,"positions":views,"disagreements":disagreements,"consensus":"MULTI_AGENT_REVIEW_REQUIRED","recommendation":"Proceed only with a measurable, reversible execution plan and defined success metrics.","created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ return jsonify(ok=True,council=decision)
+
+@app.post("/api/admin/agent-council/create-task")
+def agent_council_create_task():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};council=body.get("council") or {}
+ now=datetime.datetime.utcnow().isoformat()+"Z"
+ task={"agent":"Executive Council","title":council.get("topic","Multi-agent strategic decision"),"description":council.get("recommendation"),"priority":body.get("priority","HIGH"),"status":"RECOMMENDED","council_deliberation":json.dumps(council),"created_at":now,"updated_at":now}
+ r=supabase_request("agent_tasks",method="POST",body=task,token=token)
+ return jsonify(ok=True,task=r)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
