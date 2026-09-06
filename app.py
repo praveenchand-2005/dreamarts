@@ -1597,6 +1597,52 @@ def ai_recommendation_summary():
  for x in AI_RECOMMENDATIONS:counts[x["status"]]=counts.get(x["status"],0)+1
  return jsonify(ok=True,total=len(AI_RECOMMENDATIONS),by_status=counts,pending=sum(1 for x in AI_RECOMMENDATIONS if x["status"]=="PENDING_APPROVAL"))
 
+AI_EXECUTION_LOG=[]
+
+@app.post("/api/admin/ai/recommendations/<recommendation_id>/execute")
+def execute_ai_recommendation(recommendation_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};action=str(b.get("action","")).upper()
+ item=next((x for x in AI_RECOMMENDATIONS if x["id"]==recommendation_id),None)
+ if not item:return jsonify(error="recommendation not found"),404
+ if item["status"]!="APPROVED":return jsonify(error="recommendation requires founder approval"),403
+ allowed={"CREATE_NOTIFICATION","CREATE_OPERATION_TASK","CREATE_REPLENISHMENT_TASK","START_EXPERIMENT"}
+ if action not in allowed:return jsonify(error="action not allowed",allowed=sorted(allowed)),403
+ eid="exec_"+uuid.uuid4().hex[:12];result={"id":eid,"recommendation_id":recommendation_id,"action":action,"status":"EXECUTED","executed_at":datetime.datetime.utcnow().isoformat()+"Z","payload":b.get("payload") or {}}
+ if action=="CREATE_NOTIFICATION":
+  result["effect"]="Notification action authorized and recorded"
+ elif action=="CREATE_REPLENISHMENT_TASK":
+  result["effect"]="Inventory replenishment task authorized and recorded"
+ elif action=="CREATE_OPERATION_TASK":
+  result["effect"]="Operations task authorized and recorded"
+ else:result["effect"]="Experiment start authorized and recorded"
+ AI_EXECUTION_LOG.append(result);item["status"]="EXECUTED";item["execution_id"]=eid
+ return jsonify(ok=True,execution=result)
+
+@app.get("/api/admin/ai/executions")
+def list_ai_executions():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,count=len(AI_EXECUTION_LOG),executions=AI_EXECUTION_LOG)
+
+@app.get("/api/admin/ai/executions/<execution_id>")
+def ai_execution_detail(execution_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ x=next((e for e in AI_EXECUTION_LOG if e["id"]==execution_id),None)
+ if not x:return jsonify(error="execution not found"),404
+ return jsonify(ok=True,execution=x)
+
+@app.post("/api/admin/ai/executions/<execution_id>/outcome")
+def record_ai_execution_outcome(execution_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ x=next((e for e in AI_EXECUTION_LOG if e["id"]==execution_id),None)
+ if not x:return jsonify(error="execution not found"),404
+ b=request.get_json(silent=True) or {};x["outcome"]={"result":b.get("result"),"metrics":b.get("metrics") or {},"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"};x["status"]="OUTCOME_RECORDED"
+ return jsonify(ok=True,execution=x)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
