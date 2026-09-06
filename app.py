@@ -1490,6 +1490,44 @@ def inventory_demand():
    if pid:demand[str(pid)]=demand.get(str(pid),0)+int(i.get("quantity") or 1)
  return jsonify(ok=True,demand=[{"product_id":k,"units_requested":v} for k,v in sorted(demand.items(),key=lambda x:x[1],reverse=True)])
 
+@app.get("/api/admin/ai/business-context")
+def ai_business_context():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=status,total_amount,price,shipping_cost",token=token);products=supabase_request("products?select=name,inventory_quantity,selling_price,cost_price",token=token)
+ orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else []
+ active=sum(1 for o in orders if str(o.get("status","")).upper() not in ["DELIVERED","CANCELLED"]);cancel=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED")
+ revenue=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper() in ["PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED"])
+ low=[{"product":p.get("name"),"quantity":int(p.get("inventory_quantity") or 0)} for p in products if int(p.get("inventory_quantity") or 0)<=5]
+ return jsonify(ok=True,context={"orders":{"total":len(orders),"active":active,"cancelled":cancel},"finance":{"recognized_revenue":round(revenue,2)},"inventory":{"low_or_out":low},"products":{"total":len(products)},"generated_at":datetime.datetime.utcnow().isoformat()+"Z"})
+
+@app.get("/api/admin/ai/executive-context")
+def ai_executive_context():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount,price,shipping_cost",token=token);products=supabase_request("products?select=name,inventory_quantity",token=token)
+ orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else []
+ signals=[]
+ active=sum(1 for o in orders if str(o.get("status","")).upper() not in ["DELIVERED","CANCELLED"])
+ if active>=5:signals.append({"domain":"OPERATIONS","priority":"MEDIUM","signal":str(active)+" active orders require capacity monitoring"})
+ for p in products:
+  q=int(p.get("inventory_quantity") or 0)
+  if q<=0:signals.append({"domain":"INVENTORY","priority":"HIGH","signal":str(p.get("name"))+" is out of stock"})
+ cancelled=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED")
+ if orders and cancelled/len(orders)>.1:signals.append({"domain":"CUSTOMER","priority":"MEDIUM","signal":"Cancellation rate exceeds 10%"})
+ return jsonify(ok=True,signals=signals,executive_context_ready=True)
+
+@app.post("/api/admin/ai/decision-context")
+def ai_decision_context():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};question=str(b.get("question","")).strip()
+ if not question:return jsonify(error="question is required"),400
+ orders=supabase_request("orders?select=status,total_amount",token=token);products=supabase_request("products?select=name,inventory_quantity,selling_price,cost_price",token=token)
+ orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else []
+ return jsonify(ok=True,decision_question=question,grounded_context={"order_count":len(orders),"product_count":len(products),"low_stock_products":sum(1 for p in products if int(p.get("inventory_quantity") or 0)<=5),"instruction":"Use this live context as evidence for AI decision support, not as a guaranteed prediction."})
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
