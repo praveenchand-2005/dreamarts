@@ -747,6 +747,36 @@ def execute_real_registered_action(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(result),"updated_at":now},token=token)
  return jsonify(ok=True,execution=result)
 
+@app.get("/api/admin/execution-audit")
+def execution_audit():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?select=id,agent,title,priority,status,execution_authorization,execution_log,outcome_measurement,updated_at&limit=5000",token=token);rows=rows if isinstance(rows,list) else []
+ events=[]
+ for t in rows:
+  raw=t.get("execution_log")
+  if not raw:continue
+  try:log=json.loads(raw) if isinstance(raw,str) else raw
+  except:log={}
+  events.append({"task_id":t.get("id"),"agent":t.get("agent"),"title":t.get("title"),"priority":t.get("priority"),"status":t.get("status"),"action":log.get("action_type") or log.get("action"),"mode":log.get("mode","CONTROLLED"),"result":log.get("result") or log.get("operation"),"executed_at":log.get("executed_at"),"has_outcome":bool(t.get("outcome_measurement"))})
+ events.sort(key=lambda x:x.get("executed_at") or "",reverse=True)
+ summary={"total_executions":len(events),"real_executions":sum(1 for x in events if x["mode"]=="REAL_CONTROLLED_EXECUTION"),"with_measured_outcomes":sum(1 for x in events if x["has_outcome"])}
+ return jsonify(ok=True,summary=summary,events=events)
+
+@app.get("/api/admin/execution-audit/<task_id>")
+def execution_audit_detail(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token)
+ if not isinstance(rows,list) or not rows:return jsonify(error="Task not found"),404
+ t=rows[0];parsed={}
+ for k in ("execution_authorization","execution_log","outcome_baseline","outcome_measurement","outcome_learning","recommendation"):
+  raw=t.get(k)
+  if raw:
+   try:parsed[k]=json.loads(raw) if isinstance(raw,str) else raw
+   except:parsed[k]=raw
+ return jsonify(ok=True,task_id=task_id,audit=parsed)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
