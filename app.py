@@ -433,6 +433,27 @@ def recommendation_quality_api():
  q=recommendation_quality(auth.split(" ",1)[1])
  return jsonify(ok=True,quality=q)
 
+def recommendation_drift(token):
+ audit=decision_audit(token);now=datetime.datetime.utcnow();groups={}
+ for x in audit:
+  try: ts=datetime.datetime.fromisoformat(str(x.get("timestamp")).replace("Z","+00:00")).replace(tzinfo=None)
+  except: continue
+  n=x.get("agent","Unknown Agent");g=groups.setdefault(n,{"recent":[],"historical":[]})
+  approved=1 if x.get("decision")=="APPROVED" else 0
+  (g["recent"] if (now-ts).days<=30 else g["historical"]).append(approved)
+ alerts=[]
+ for n,g in groups.items():
+  if len(g["recent"])>=3 and len(g["historical"])>=3:
+   recent=sum(g["recent"])/len(g["recent"])*100;hist=sum(g["historical"])/len(g["historical"])*100;drop=round(hist-recent,1)
+   if drop>=20:alerts.append({"agent":n,"historical_quality":round(hist,1),"recent_quality":round(recent,1),"quality_drop":drop,"severity":"HIGH" if drop>=35 else "MEDIUM","action":"Review recent recommendations and temporarily reduce trust weighting."})
+ return {"alerts":alerts,"agents_checked":len(groups)}
+
+@app.get("/api/admin/recommendation-drift")
+def recommendation_drift_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,drift=recommendation_drift(auth.split(" ",1)[1]))
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
