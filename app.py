@@ -1576,6 +1576,19 @@ def ai_repo_mode(token):
 
 AI_RECOMMENDATIONS=[]
 
+def ai_recommendation_rows(token,status=None):
+ q="select=*"+(("&status=eq."+status) if status else "")+"&order=created_at.desc"
+ rows=ai_repo_get("ai_recommendations",token,q)
+ return rows if rows is not None else [x for x in AI_RECOMMENDATIONS if not status or x["status"]==status]
+def ai_recommendation_find(rid,token):
+ rows=ai_repo_get("ai_recommendations",token,"id=eq."+str(rid)+"&select=*&limit=1")
+ if rows is not None:return rows[0] if rows else None
+ return next((x for x in AI_RECOMMENDATIONS if x["id"]==rid),None)
+def ai_recommendation_store(item,token):
+ rows=ai_repo_insert("ai_recommendations",item,token)
+ if rows is None:AI_RECOMMENDATIONS.append(item);return item,"memory_fallback"
+ return rows[0] if isinstance(rows,list) and rows else item,"postgres"
+
 @app.post("/api/admin/ai/recommendations")
 def create_ai_recommendation():
  auth=request.headers.get("Authorization","")
@@ -1584,13 +1597,13 @@ def create_ai_recommendation():
  if not title or not recommendation:return jsonify(error="title and recommendation are required"),400
  risk=str(b.get("risk","MEDIUM")).upper();confidence=max(0,min(100,float(b.get("confidence",50))))
  rid="rec_"+uuid.uuid4().hex[:12];item={"id":rid,"title":title,"recommendation":recommendation,"source_event":b.get("source_event"),"risk":risk,"confidence":confidence,"status":"PENDING_APPROVAL","created_at":datetime.datetime.utcnow().isoformat()+"Z","decision":None}
- AI_RECOMMENDATIONS.append(item);return jsonify(ok=True,recommendation=item)
+ stored,mode=ai_recommendation_store(item,token);return jsonify(ok=True,recommendation=stored,persistence_mode=mode)
 
 @app.get("/api/admin/ai/recommendations")
 def list_ai_recommendations():
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- status=request.args.get("status");rows=[x for x in AI_RECOMMENDATIONS if not status or x["status"]==status.upper()]
+ status=request.args.get("status");status=status.upper() if status else None;rows=ai_recommendation_rows(token,status)
  return jsonify(ok=True,count=len(rows),recommendations=rows)
 
 @app.post("/api/admin/ai/recommendations/<recommendation_id>/decision")
@@ -1599,7 +1612,7 @@ def decide_ai_recommendation(recommendation_id):
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  b=request.get_json(silent=True) or {};decision=str(b.get("decision","")).upper()
  if decision not in ["APPROVED","REJECTED","MODIFIED"]:return jsonify(error="decision must be APPROVED, REJECTED or MODIFIED"),400
- item=next((x for x in AI_RECOMMENDATIONS if x["id"]==recommendation_id),None)
+ item=ai_recommendation_find(recommendation_id,token)
  if not item:return jsonify(error="recommendation not found"),404
  item["status"]=decision;item["decision"]={"decision":decision,"comment":b.get("comment"),"decided_at":datetime.datetime.utcnow().isoformat()+"Z"}
  return jsonify(ok=True,recommendation=item)
