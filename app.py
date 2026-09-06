@@ -1405,6 +1405,50 @@ def team_audit_summary():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,governance={"roles_defined":len(TEAM_ROLES),"principle":"least_privilege","approval_model":"role_based","audit_ready":True})
 
+def order_financial_amount(o):
+ return float(o.get("total_amount") or o.get("price") or 0)+float(o.get("shipping_cost") or 0)
+
+@app.get("/api/admin/finance/ledger")
+def finance_ledger():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=order_number,status,total_amount,price,shipping_cost,created_at,updated_at",token=token);orders=orders if isinstance(orders,list) else []
+ entries=[]
+ for o in orders:
+  s=str(o.get("status","")).upper();amount=order_financial_amount(o)
+  if s in ["PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED"]:entries.append({"date":o.get("updated_at") or o.get("created_at"),"type":"REVENUE","reference":o.get("order_number"),"amount":round(amount,2),"status":"RECOGNIZED"})
+  elif s=="PAYMENT PENDING":entries.append({"date":o.get("updated_at") or o.get("created_at"),"type":"RECEIVABLE","reference":o.get("order_number"),"amount":round(amount,2),"status":"PENDING"})
+  elif s=="CANCELLED":entries.append({"date":o.get("updated_at") or o.get("created_at"),"type":"CANCELLATION","reference":o.get("order_number"),"amount":round(amount,2),"status":"VOID"})
+ return jsonify(ok=True,count=len(entries),entries=entries)
+
+@app.get("/api/admin/finance/cashflow")
+def finance_cashflow():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount,price,shipping_cost",token=token);orders=orders if isinstance(orders,list) else []
+ inflow=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper() in ["PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED"])
+ receivable=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper()=="PAYMENT PENDING")
+ return jsonify(ok=True,cash_inflow=round(inflow,2),accounts_receivable=round(receivable,2),known_expenses=0,net_cash_position_estimate=round(inflow,2),note="Expense ledger not yet connected")
+
+@app.get("/api/admin/finance/profitability")
+def finance_profitability():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];products=supabase_request("products?select=name,selling_price,cost_price",token=token);products=products if isinstance(products,list) else []
+ rows=[]
+ for p in products:
+  s=float(p.get("selling_price") or 0);c=float(p.get("cost_price") or 0);m=s-c
+  rows.append({"product":p.get("name"),"selling_price":s,"cost":c,"gross_margin":round(m,2),"margin_percent":round(m/s*100,2) if s else 0})
+ return jsonify(ok=True,products=rows)
+
+@app.get("/api/admin/finance/executive")
+def finance_executive():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount,price,shipping_cost",token=token);orders=orders if isinstance(orders,list) else []
+ rev=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper() in ["PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED"]);recv=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper()=="PAYMENT PENDING")
+ return jsonify(ok=True,revenue_recognized=round(rev,2),receivables=round(recv,2),financial_attention=["Connect expense ledger for true net profit"] if rev else ["No recognized revenue yet"])
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
