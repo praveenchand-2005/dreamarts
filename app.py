@@ -721,6 +721,32 @@ def execute_registered_action(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(record),"updated_at":now},token=token)
  return jsonify(ok=True,action=record)
 
+@app.post("/api/admin/agent-tasks/<task_id>/execute-real-action")
+def execute_real_registered_action(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};action_type=body.get("action_type");payload=body.get("payload",{})
+ rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ if task.get("status")!="EXECUTION_AUTHORIZED":return jsonify(error="Founder authorization required"),403
+ agent=task.get("agent");spec=EXECUTION_ACTION_REGISTRY.get(agent,{}).get(action_type)
+ if not spec:return jsonify(error="Action is not registered for this agent"),403
+ now=datetime.datetime.utcnow().isoformat()+"Z";result={"action_type":action_type,"mode":"REAL_CONTROLLED_EXECUTION","executed_at":now}
+ if action_type=="ORDER_REVIEW":
+  oid=payload.get("order_id")
+  if not oid:return jsonify(error="order_id required"),400
+  r=supabase_request("orders?id=eq."+str(oid),method="PATCH",body={"status":"UNDER_REVIEW"},token=token);result["target_order_id"]=oid;result["operation"]="order status changed to UNDER_REVIEW";result["response"]=r
+ elif action_type=="ORDER_ESCALATION":
+  oid=payload.get("order_id")
+  if not oid:return jsonify(error="order_id required"),400
+  escalation={"order_id":oid,"task_id":task_id,"agent":agent,"reason":payload.get("reason",task.get("description")),"priority":task.get("priority","MEDIUM"),"status":"OPEN","created_at":now}
+  r=supabase_request("operational_escalations",method="POST",body=escalation,token=token);result["target_order_id"]=oid;result["operation"]="operational escalation created";result["response"]=r
+ else:
+  follow={"source_task_id":task_id,"agent":agent,"action_type":action_type,"title":spec["description"],"status":"OPEN","created_at":now}
+  r=supabase_request("agent_tasks",method="POST",body=follow,token=token);result["operation"]="controlled follow-up task created";result["response"]=r
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(result),"updated_at":now},token=token)
+ return jsonify(ok=True,execution=result)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
