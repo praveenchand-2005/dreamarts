@@ -1528,6 +1528,37 @@ def ai_decision_context():
  orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else []
  return jsonify(ok=True,decision_question=question,grounded_context={"order_count":len(orders),"product_count":len(products),"low_stock_products":sum(1 for p in products if int(p.get("inventory_quantity") or 0)<=5),"instruction":"Use this live context as evidence for AI decision support, not as a guaranteed prediction."})
 
+AI_EVENT_ROUTING={"INVENTORY_STOCKOUT":{"agent":"inventory_intelligence","priority":"HIGH"},"LOW_STOCK":{"agent":"inventory_intelligence","priority":"MEDIUM"},"PAYMENT_PENDING":{"agent":"finance_intelligence","priority":"MEDIUM"},"HIGH_CANCELLATION":{"agent":"customer_intelligence","priority":"MEDIUM"},"OPERATIONS_BOTTLENECK":{"agent":"operations_intelligence","priority":"HIGH"}}
+
+@app.post("/api/admin/ai/events")
+def ai_business_event():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};event_type=str(b.get("event_type","")).upper();data=b.get("data") or {}
+ if event_type not in AI_EVENT_ROUTING:return jsonify(error="Unknown event_type",supported=list(AI_EVENT_ROUTING)),400
+ route=AI_EVENT_ROUTING[event_type]
+ return jsonify(ok=True,event={"type":event_type,"data":data,"received_at":datetime.datetime.utcnow().isoformat()+"Z"},routing=route,next_step="Build live context and request governed AI analysis")
+
+@app.get("/api/admin/ai/events/routing")
+def ai_event_routing():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,routes=AI_EVENT_ROUTING)
+
+@app.get("/api/admin/ai/events/signals")
+def ai_event_signals():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];products=supabase_request("products?select=name,inventory_quantity",token=token);orders=supabase_request("orders?select=status",token=token)
+ products=products if isinstance(products,list) else [];orders=orders if isinstance(orders,list) else [];events=[]
+ for p in products:
+  q=int(p.get("inventory_quantity") or 0)
+  if q<=0:events.append({"event_type":"INVENTORY_STOCKOUT","data":{"product":p.get("name"),"quantity":q}})
+  elif q<=5:events.append({"event_type":"LOW_STOCK","data":{"product":p.get("name"),"quantity":q}})
+ active=sum(1 for o in orders if str(o.get("status","")).upper() not in ["DELIVERED","CANCELLED"])
+ if active>=10:events.append({"event_type":"OPERATIONS_BOTTLENECK","data":{"active_orders":active}})
+ return jsonify(ok=True,count=len(events),events=events)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
