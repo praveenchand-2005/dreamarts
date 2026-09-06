@@ -1681,16 +1681,25 @@ def ai_execution_detail(execution_id):
  if not x:return jsonify(error="execution not found"),404
  return jsonify(ok=True,execution=x)
 
+def ai_execution_record_outcome(eid,outcome,token):
+ item=ai_execution_find(eid,token)
+ if not item:return None,"not_found"
+ item["outcome"]=outcome;item["status"]="OUTCOME_RECORDED"
+ db=ai_repo_update("ai_executions",eid,{"outcome":outcome,"status":"OUTCOME_RECORDED"},token)
+ if db is None:
+  for i,x in enumerate(AI_EXECUTION_LOG):
+   if x["id"]==eid:AI_EXECUTION_LOG[i]=item;break
+ return item,"postgres" if db is not None else "memory_fallback"
+
 @app.post("/api/admin/ai/executions/<execution_id>/outcome")
 def record_ai_execution_outcome(execution_id):
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- x=next((e for e in AI_EXECUTION_LOG if e["id"]==execution_id),None)
- if not x:return jsonify(error="execution not found"),404
- b=request.get_json(silent=True) or {};x["outcome"]={"result":b.get("result"),"metrics":b.get("metrics") or {},"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"};x["status"]="OUTCOME_RECORDED"
- return jsonify(ok=True,execution=x)
-
-AI_LEARNING_MEMORY=[]
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ outcome={"result":b.get("result"),"metrics":b.get("metrics") or {},"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ item,mode=ai_execution_record_outcome(execution_id,outcome,token)
+ if not item:return jsonify(error="execution not found"),404
+ return jsonify(ok=True,execution=item,persistence_mode=mode)
 
 @app.post("/api/admin/ai/executions/<execution_id>/learn")
 def learn_from_ai_execution(execution_id):
