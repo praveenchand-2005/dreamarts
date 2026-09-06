@@ -250,6 +250,25 @@ def order_timeline(status):
  idx=stages.index(status) if status in stages else 0
  return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
 
+@app.get("/api/my-referral")
+def my_referral():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ uid=get_user_id(token)
+ if not uid:return jsonify(error="Unauthorized"),401
+ rows=supabase_request("referrals?referrer_id=eq."+uid+"&select=*&limit=1",token=token)
+ if not rows:
+  code="DREAM"+uuid.uuid4().hex[:8].upper()
+  r=supabase_request("referrals",method="POST",body={"referrer_id":uid,"code":code},token=token,prefer="return=representation")
+  rows=r if isinstance(r,list) else []
+ return jsonify(rows[0] if rows else {"code":None})
+
+@app.get("/api/referral/<code>")
+def referral_lookup(code):
+ rows=supabase_request("referrals?code=eq."+code.upper()+"&select=code,referrer_id")
+ return jsonify(valid=bool(rows),code=code.upper())
+
 @app.get("/api/gallery")
 def public_gallery():
  rows=supabase_request("order_reviews?gallery_permission=eq.true&select=order_number,rating,review,created_at&order=created_at.desc&limit=100")
