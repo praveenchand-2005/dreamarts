@@ -130,6 +130,18 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/orders/<order_number>/specification")
+def order_specification(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("orders?order_number=eq."+order_number+"&select=*",token=token)
+ if not isinstance(rows,list) or not rows:return jsonify(error="Order not found."),404
+ o=rows[0]
+ try:o["production_notes"]=json.loads(o.get("notes") or "{}")
+ except Exception:o["production_notes"]={}
+ return jsonify(o)
+
 @app.get("/api/admin/production")
 def production_queue():
  auth=request.headers.get("Authorization","")
