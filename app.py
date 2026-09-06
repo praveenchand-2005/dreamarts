@@ -362,6 +362,22 @@ def approve_agent_task(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","approved_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
  return jsonify(ok=True,task_id=task_id,status="EXECUTED")
 
+@app.post("/api/admin/agent-tasks/<task_id>/reject")
+def reject_agent_task(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];reason=(request.get_json(silent=True) or {}).get("reason","Founder rejected recommendation.")
+ r=supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"REJECTED","rejection_reason":reason,"updated_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
+ return jsonify(ok=True,task_id=task_id,status="REJECTED")
+
+@app.post("/api/admin/agent-tasks/<task_id>/delegate")
+def delegate_agent_task(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};owner=b.get("owner","Founder")
+ r=supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"DELEGATED","delegated_to":owner,"updated_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
+ return jsonify(ok=True,task_id=task_id,status="DELEGATED",delegated_to=owner)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
