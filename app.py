@@ -250,6 +250,26 @@ def order_timeline(status):
  idx=stages.index(status) if status in stages else 0
  return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
 
+@app.post("/api/my-orders/<order_number>/review")
+def submit_review(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ rating=int(b.get("rating",0))
+ if rating<1 or rating>5:return jsonify(error="Rating must be 1 to 5."),400
+ row={"order_number":order_number,"rating":rating,"review":str(b.get("review",""))[:2000],"gallery_permission":bool(b.get("gallery_permission"))}
+ existing=supabase_request("order_reviews?order_number=eq."+order_number+"&select=id",token=token)
+ r=supabase_request("order_reviews?order_number=eq."+order_number,method="PATCH",body=row,token=token,prefer="return=representation") if isinstance(existing,list) and existing else supabase_request("order_reviews",method="POST",body=row,token=token,prefer="return=representation")
+ if isinstance(r,dict) and "_error" in r:return jsonify(error="Could not save review.",details=r["_error"]),400
+ return jsonify(ok=True)
+
+@app.get("/api/my-orders/<order_number>/review")
+def get_review(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ return jsonify(supabase_request("order_reviews?order_number=eq."+order_number+"&select=rating,review,gallery_permission,created_at&limit=1",token=token))
+
 @app.get("/api/my-orders/<order_number>/completion-proof")
 def completion_proof(order_number):
  auth=request.headers.get("Authorization","")
