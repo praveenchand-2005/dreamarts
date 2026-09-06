@@ -260,6 +260,28 @@ def decision_learning_api():
  data=decision_learning(auth.split(" ",1)[1])
  return jsonify(ok=True,learning=data,insight="Agent execution patterns are used to identify recurring workload and prioritization gaps.")
 
+def outcome_tracking(token):
+ rows=supabase_request("agent_tasks?select=id,agent,title,priority,status,created_at,updated_at&limit=1000",token=token);rows=rows if isinstance(rows,list) else []
+ now=datetime.datetime.utcnow();by_agent={};executed=[]
+ for x in rows:
+  agent=x.get("agent","Unknown Agent");m=by_agent.setdefault(agent,{"created":0,"executed":0,"pending":0,"avg_resolution_hours":0,"_hours":[]})
+  m["created"]+=1
+  if x.get("status")=="EXECUTED":
+   m["executed"]+=1;executed.append(x)
+   try:
+    c=datetime.datetime.fromisoformat(str(x.get("created_at")).replace("Z","+00:00")).replace(tzinfo=None);u=datetime.datetime.fromisoformat(str(x.get("updated_at") or x.get("created_at")).replace("Z","+00:00")).replace(tzinfo=None);m["_hours"].append(round((u-c).total_seconds()/3600,2))
+   except: pass
+  elif x.get("status")=="PENDING":m["pending"]+=1
+ for m in by_agent.values():
+  h=m.pop("_hours");m["avg_resolution_hours"]=round(sum(h)/len(h),2) if h else 0;m["execution_rate"]=round(m["executed"]/m["created"]*100,1) if m["created"] else 0
+ return {"total_tasks":len(rows),"executed_tasks":len(executed),"overall_execution_rate":round(len(executed)/len(rows)*100,1) if rows else 0,"agents":by_agent}
+
+@app.get("/api/admin/outcomes")
+def outcomes_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,outcomes=outcome_tracking(auth.split(" ",1)[1]))
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
