@@ -998,6 +998,26 @@ def decide_strategy_experiment(experiment_id):
  r=supabase_request("strategy_experiments?id=eq."+experiment_id,method="PATCH",body=body,token=token)
  return jsonify(ok=True,decision=decision,result=r)
 
+@app.post("/api/admin/strategy/experiments/<experiment_id>/evaluate")
+def evaluate_strategy_experiment(experiment_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ baseline=b.get("baseline",{});results=b.get("results",{});metrics=[]
+ keys=b.get("metrics") or sorted(set(list(baseline.keys())+list(results.keys())))
+ for key in keys:
+  base=float(baseline.get(key,0) or 0);actual=float(results.get(key,0) or 0)
+  change=((actual-base)/abs(base)*100) if base else (100 if actual>0 else 0)
+  metrics.append({"metric":key,"baseline":base,"result":actual,"change_percent":round(change,2)})
+ improvements=[m["change_percent"] for m in metrics]
+ score=round(sum(max(-100,min(100,x)) for x in improvements)/len(improvements),2) if improvements else 0
+ confidence=float(b.get("confidence",60));risk=float(b.get("risk",30))
+ success_score=round(max(0,min(100,50+score*.35+confidence*.2-risk*.15)),2)
+ recommendation="SCALE" if success_score>=75 else "CONTINUE" if success_score>=60 else "MODIFY" if success_score>=40 else "STOP"
+ evaluation={"baseline":baseline,"results":results,"metric_analysis":metrics,"improvement_score":score,"confidence":confidence,"risk":risk,"success_score":success_score,"recommendation":recommendation,"evaluated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ r=supabase_request("strategy_experiments?id=eq."+experiment_id,method="PATCH",body={"evaluation":evaluation,"updated_at":evaluation["evaluated_at"]},token=token)
+ return jsonify(ok=True,evaluation=evaluation,result=r)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
