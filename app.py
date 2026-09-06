@@ -464,6 +464,23 @@ def recommendation_drift_api():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,drift=recommendation_drift(auth.split(" ",1)[1]))
 
+@app.get("/api/admin/business-pulse")
+def business_pulse_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=order_number,status,created_at,amount,price,payment_status&limit=2000",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ revenue=sum(float(o.get("amount") or o.get("price") or 0) for o in paid)
+ recent=[];aging=[]
+ for o in orders:
+  try:
+   ts=datetime.datetime.fromisoformat(str(o.get("created_at")).replace("Z","+00:00")).replace(tzinfo=None);age=(now-ts).total_seconds()/3600
+   if age<=24:recent.append(o)
+   if age>=72 and str(o.get("status","")).upper() not in ("COMPLETED","DELIVERED","CANCELLED"):aging.append(o)
+  except:pass
+ return jsonify(ok=True,pulse={"total_orders":len(orders),"paid_orders":len(paid),"paid_revenue":round(revenue,2),"orders_last_24h":len(recent),"aging_orders":len(aging),"average_order_value":round(revenue/len(paid),2) if paid else 0,"generated_at":now.isoformat()+"Z"},alerts=[{"severity":"HIGH","area":"OPERATIONS","message":f"{len(aging)} orders have been open for 72+ hours."}] if aging else [])
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
