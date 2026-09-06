@@ -250,6 +250,16 @@ def order_timeline(status):
  idx=stages.index(status) if status in stages else 0
  return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
 
+@app.get("/api/gallery")
+def public_gallery():
+ rows=supabase_request("order_reviews?gallery_permission=eq.true&select=order_number,rating,review,created_at&order=created_at.desc&limit=100")
+ items=[]
+ for r in rows if isinstance(rows,list) else []:
+  qc=supabase_request("order_qc?order_number=eq."+r["order_number"]+"&qc_status=eq.APPROVED&select=final_photo_url&limit=1")
+  if isinstance(qc,list) and qc and qc[0].get("final_photo_url"):
+   items.append({"order_number":r["order_number"],"rating":r["rating"],"review":r.get("review"),"created_at":r.get("created_at"),"photo_url":qc[0]["final_photo_url"]})
+ return jsonify(items)
+
 @app.post("/api/my-orders/<order_number>/review")
 def submit_review(order_number):
  auth=request.headers.get("Authorization","")
