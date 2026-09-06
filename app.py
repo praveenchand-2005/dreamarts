@@ -505,6 +505,23 @@ def business_anomalies_api():
  if aging>=3:an.append({"type":"ORDER_AGING","severity":"HIGH" if aging>=10 else "MEDIUM","message":f"{aging} orders have remained open for more than 72 hours.","value":aging})
  return jsonify(ok=True,count=len(an),anomalies=an,generated_at=now.isoformat()+"Z")
 
+@app.post("/api/admin/business-anomalies/dispatch")
+def dispatch_business_anomalies():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ # Reuse anomaly engine through current request context.
+ resp=business_anomalies_api()
+ data=resp.get_json() if hasattr(resp,"get_json") else {}
+ anomalies=data.get("anomalies",[]);created=[]
+ mapping={"ORDER_VOLUME_DROP":"Sales Intelligence Agent","REVENUE_DROP":"Finance Intelligence Agent","ORDER_AGING":"Operations Agent"}
+ for x in anomalies:
+  agent=mapping.get(x.get("type"),"Operations Agent")
+  task={"agent":agent,"title":"Investigate "+x.get("type","BUSINESS_ANOMALY").replace("_"," ").title(),"description":x.get("message"),"priority":x.get("severity","MEDIUM"),"status":"PENDING","source":"BUSINESS_ANOMALY","created_at":datetime.datetime.utcnow().isoformat()+"Z","updated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+  r=supabase_request("agent_tasks",method="POST",body=task,token=token)
+  created.append({"agent":agent,"anomaly":x.get("type"),"result":r})
+ return jsonify(ok=True,anomalies=len(anomalies),tasks_dispatched=len(created),created=created)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
