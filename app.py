@@ -1078,6 +1078,47 @@ def product_intelligence():
  analysis.sort(key=lambda x:x["unit_margin"],reverse=True)
  return jsonify(ok=True,count=len(analysis),products=analysis)
 
+ORDER_STATUS_FLOW=["NEW REQUEST","PHOTO REVIEW","QUOTE SENT","AWAITING APPROVAL","PAYMENT PENDING","PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED","CANCELLED"]
+
+@app.post("/api/admin/orders/<order_number>/transition")
+def order_transition(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};new=str(b.get("status","")).upper()
+ if new not in ORDER_STATUS_FLOW:return jsonify(error="Invalid order status",allowed=ORDER_STATUS_FLOW),400
+ rows=supabase_request("orders?order_number=eq."+urllib.parse.quote(order_number)+"&select=*",token=token)
+ if not isinstance(rows,list) or not rows:return jsonify(error="Order not found"),404
+ old=str(rows[0].get("status","")).upper()
+ if old in ORDER_STATUS_FLOW and old!="CANCELLED":
+  oi=ORDER_STATUS_FLOW.index(old);ni=ORDER_STATUS_FLOW.index(new)
+  if new!="CANCELLED" and ni<oi:return jsonify(error="Backward transition not allowed",current=old),409
+ now=datetime.datetime.utcnow().isoformat()+"Z";r=supabase_request("orders?order_number=eq."+urllib.parse.quote(order_number),method="PATCH",body={"status":new,"updated_at":now},token=token)
+ try:create_order_notification(token,order_number,"Order status updated","Your order is now "+new,"order_update")
+ except:pass
+ return jsonify(ok=True,order_number=order_number,previous_status=old,status=new,result=r)
+
+@app.get("/api/admin/orders/<order_number>/lifecycle")
+def order_lifecycle(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("orders?order_number=eq."+urllib.parse.quote(order_number)+"&select=*",token=token)
+ if not isinstance(rows,list) or not rows:return jsonify(error="Order not found"),404
+ order=rows[0];current=str(order.get("status","")).upper();idx=ORDER_STATUS_FLOW.index(current) if current in ORDER_STATUS_FLOW else -1
+ stages=[{"status":s,"state":"CURRENT" if s==current else "COMPLETED" if idx>i else "PENDING"} for i,s in enumerate(ORDER_STATUS_FLOW) if not(current=="CANCELLED" and s!="CANCELLED")]
+ return jsonify(ok=True,order_number=order_number,current_status=current,lifecycle=stages)
+
+@app.get("/api/admin/orders/operations/summary")
+def order_operations_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("orders?select=status",token=token);rows=rows if isinstance(rows,list) else []
+ counts={s:0 for s in ORDER_STATUS_FLOW}
+ for x in rows:
+  s=str(x.get("status","")).upper()
+  if s in counts:counts[s]+=1
+ active=sum(v for k,v in counts.items() if k not in ["DELIVERED","CANCELLED"])
+ return jsonify(ok=True,total=len(rows),active=active,by_status=counts)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
