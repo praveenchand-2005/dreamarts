@@ -158,8 +158,12 @@ def generate_agent_tasks(token):
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
- if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- token=auth.split(" ",1)[1]
+ agent_key=os.environ.get("DREAMARTS_AGENT_KEY","")
+ if auth=="Bearer "+agent_key:
+  token=os.environ.get("SUPABASE_SERVICE_ROLE_KEY","") or agent_key
+ elif auth.startswith("Bearer "):
+  token=auth.split(" ",1)[1]
+ else:return jsonify(error="Unauthorized"),401
  created=generate_agent_tasks(token)
  return jsonify(ok=True,created=len(created),tasks=created,ran_at=datetime.datetime.utcnow().isoformat()+"Z")
 
