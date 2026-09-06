@@ -578,6 +578,36 @@ def run_business_intelligence():
   r=supabase_request("agent_tasks",method="POST",body=task,token=token);results.append({"anomaly":typ,"agent":agent,"created":bool(r)})
  return jsonify(ok=True,anomalies_detected=len(anomalies),recommendations_created=len(results),results=results)
 
+@app.post("/api/admin/agent-tasks/<task_id>/outcome-baseline")
+def capture_outcome_baseline(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ orders=supabase_request("orders?select=status,amount,price,payment_status&limit=3000",token=token);orders=orders if isinstance(orders,list) else []
+ paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ baseline={"captured_at":datetime.datetime.utcnow().isoformat()+"Z","total_orders":len(orders),"paid_orders":len(paid),"paid_revenue":round(sum(float(o.get("amount") or o.get("price") or 0) for o in paid),2),"open_orders":sum(1 for o in orders if str(o.get("status","")).upper() not in ("COMPLETED","DELIVERED","CANCELLED"))}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"outcome_baseline":json.dumps(baseline),"updated_at":baseline["captured_at"]},token=token)
+ return jsonify(ok=True,baseline=baseline)
+
+@app.post("/api/admin/agent-tasks/<task_id>/measure-outcome")
+def measure_outcome(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ raw=task.get("outcome_baseline")
+ if not raw:return jsonify(error="Capture baseline before measuring outcome"),400
+ try:base=json.loads(raw) if isinstance(raw,str) else raw
+ except:return jsonify(error="Invalid baseline"),400
+ orders=supabase_request("orders?select=status,amount,price,payment_status&limit=3000",token=token);orders=orders if isinstance(orders,list) else []
+ paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ current={"total_orders":len(orders),"paid_orders":len(paid),"paid_revenue":round(sum(float(o.get("amount") or o.get("price") or 0) for o in paid),2),"open_orders":sum(1 for o in orders if str(o.get("status","")).upper() not in ("COMPLETED","DELIVERED","CANCELLED"))}
+ delta={k:round(current[k]-base.get(k,0),2) for k in current};roi_signal=round((delta["paid_revenue"]/base["paid_revenue"]*100),2) if base.get("paid_revenue") else None
+ outcome={"measured_at":datetime.datetime.utcnow().isoformat()+"Z","baseline":base,"current":current,"delta":delta,"revenue_change_percent":roi_signal,"assessment":"IMPROVED" if (roi_signal is not None and roi_signal>0) or delta["open_orders"]<0 else "NO_CLEAR_IMPROVEMENT"}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"outcome_measurement":json.dumps(outcome),"updated_at":outcome["measured_at"]},token=token)
+ return jsonify(ok=True,outcome=outcome)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
