@@ -1681,6 +1681,38 @@ def ai_learning_summary():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,total_lessons=len(AI_LEARNING_MEMORY),executions_with_outcomes=sum(1 for x in AI_EXECUTION_LOG if x.get("outcome")),learning_loop_status="ACTIVE")
 
+AI_PERSIST_TABLES=["ai_recommendations","ai_executions","ai_learning_memory","ai_event_history"]
+
+def ai_persist_status(token):
+ checks={}
+ for table in AI_PERSIST_TABLES:
+  r=supabase_request(table+"?select=id&limit=1",token=token)
+  checks[table]=not (isinstance(r,dict) and "_error" in r)
+ return checks
+
+@app.get("/api/admin/ai/persistence/status")
+def ai_persistence_status():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ checks=ai_persist_status(auth.split(" ",1)[1])
+ return jsonify(ok=True,tables=checks,persistent_tables=sum(1 for v in checks.values() if v),required_tables=AI_PERSIST_TABLES,ready=all(checks.values()))
+
+@app.post("/api/admin/ai/persistence/export")
+def ai_persistence_export():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,schema_version=1,exported_at=datetime.datetime.utcnow().isoformat()+"Z",data={"recommendations":AI_RECOMMENDATIONS,"executions":AI_EXECUTION_LOG,"learning_memory":AI_LEARNING_MEMORY,"event_routing":AI_EVENT_ROUTING})
+
+@app.get("/api/admin/ai/persistence/schema")
+def ai_persistence_schema():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,postgres_schema={
+ "ai_recommendations":["id uuid primary key","title text","recommendation text","source_event text","risk text","confidence numeric","status text","decision jsonb","created_at timestamptz"],
+ "ai_executions":["id uuid primary key","recommendation_id text","action text","status text","payload jsonb","outcome jsonb","created_at timestamptz"],
+ "ai_learning_memory":["id uuid primary key","execution_id text","recommendation_id text","action text","lesson text","outcome jsonb","created_at timestamptz"],
+ "ai_event_history":["id uuid primary key","event_type text","data jsonb","priority text","agent text","created_at timestamptz"]})
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
