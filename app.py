@@ -1713,6 +1713,23 @@ def ai_persistence_schema():
  "ai_learning_memory":["id uuid primary key","execution_id text","recommendation_id text","action text","lesson text","outcome jsonb","created_at timestamptz"],
  "ai_event_history":["id uuid primary key","event_type text","data jsonb","priority text","agent text","created_at timestamptz"]})
 
+def ai_db_write(table,row,token):
+ r=supabase_request(table,method="POST",body=row,token=token,prefer="return=representation")
+ return not (isinstance(r,dict) and "_error" in r)
+
+@app.post("/api/admin/ai/persistence/verify")
+def verify_ai_persistence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ checks=ai_persist_status(auth.split(" ",1)[1])
+ return jsonify(ok=all(checks.values()),checks=checks,next_step="persistent_ai_storage_ready" if all(checks.values()) else "run_supabase_migration")
+
+@app.get("/api/admin/ai/persistence/migration")
+def ai_persistence_migration_info():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,migration_file="supabase/migrations/20260906_ai_persistence.sql",tables=AI_PERSIST_TABLES)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
