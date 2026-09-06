@@ -1325,6 +1325,56 @@ def inventory_intelligence():
   if q<=5:insights.append({"type":"REPLENISHMENT","product":p.get("name"),"quantity":q,"priority":"URGENT" if q<=0 else "HIGH","recommendation":"Replenish inventory before stockout"})
  return jsonify(ok=True,insights=insights)
 
+def create_admin_notification(token,title,message,kind="system",severity="INFO",entity_type=None,entity_id=None):
+ body={"title":title,"message":message,"type":kind}
+ if entity_type:body["entity_type"]=entity_type
+ if entity_id:body["entity_id"]=str(entity_id)
+ try:return supabase_request("notifications",method="POST",body=body,token=token,prefer="return=representation")
+ except:return None
+
+@app.get("/api/admin/notifications")
+def admin_notifications():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];limit=min(max(int(request.args.get("limit",50)),1),200)
+ rows=supabase_request("notifications?select=*&order=created_at.desc&limit="+str(limit),token=token);rows=rows if isinstance(rows,list) else []
+ return jsonify(ok=True,count=len(rows),notifications=rows)
+
+@app.get("/api/admin/notifications/summary")
+def notification_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("notifications?select=type,created_at",token=token);rows=rows if isinstance(rows,list) else []
+ by_type={}
+ for x in rows:by_type[x.get("type") or "system"]=by_type.get(x.get("type") or "system",0)+1
+ return jsonify(ok=True,total=len(rows),by_type=by_type)
+
+@app.post("/api/admin/notifications/broadcast")
+def notification_broadcast():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};title=str(b.get("title","")).strip();message=str(b.get("message","")).strip()
+ if not title or not message:return jsonify(error="title and message are required"),400
+ profiles=supabase_request("profiles?select=id",token=token);profiles=profiles if isinstance(profiles,list) else []
+ sent=0
+ for p in profiles:
+  try:supabase_request("notifications",method="POST",body={"user_id":p["id"],"title":title,"message":message,"type":b.get("type","broadcast")},token=token);sent+=1
+  except:pass
+ return jsonify(ok=True,recipients=sent,title=title)
+
+@app.get("/api/admin/notifications/intelligence")
+def notification_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];inv=supabase_request("products?select=name,inventory_quantity",token=token);orders=supabase_request("orders?select=order_number,status,updated_at,created_at",token=token)
+ inv=inv if isinstance(inv,list) else [];orders=orders if isinstance(orders,list) else [];signals=[]
+ for p in inv:
+  q=int(p.get("inventory_quantity") or 0)
+  if q<=5:signals.append({"category":"INVENTORY","priority":"HIGH" if q<=0 else "MEDIUM","message":(p.get("name") or "Product")+" stock requires attention"})
+ for o in orders:
+  if str(o.get("status","")).upper()=="PAYMENT PENDING":signals.append({"category":"PAYMENT","priority":"MEDIUM","message":"Payment pending for order "+str(o.get("order_number") or "")})
+ return jsonify(ok=True,signals=signals)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
