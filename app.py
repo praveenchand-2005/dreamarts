@@ -1280,6 +1280,51 @@ def analytics_executive_summary():
  if orders and canc/len(orders)>.1:attention.append("Cancellation rate requires investigation")
  return jsonify(ok=True,summary={"revenue":round(revenue,2),"active_orders":active,"total_orders":len(orders),"attention_required":attention,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"})
 
+@app.get("/api/admin/inventory")
+def inventory_overview():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("products?select=id,name,sku,inventory_quantity,selling_price,status",token=token);rows=rows if isinstance(rows,list) else []
+ out=[];total=0
+ for p in rows:
+  q=int(p.get("inventory_quantity") or 0);total+=q
+  out.append({**p,"stock_status":"OUT_OF_STOCK" if q<=0 else "LOW_STOCK" if q<=5 else "HEALTHY"})
+ return jsonify(ok=True,total_products=len(out),total_units=total,items=out)
+
+@app.patch("/api/admin/inventory/<product_id>")
+def update_inventory(product_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ if "quantity" not in b:return jsonify(error="quantity is required"),400
+ try:q=max(0,int(b["quantity"]))
+ except:return jsonify(error="quantity must be numeric"),400
+ r=supabase_request("products?id=eq."+product_id,method="PATCH",body={"inventory_quantity":q,"updated_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
+ return jsonify(ok=True,product_id=product_id,inventory_quantity=q,result=r)
+
+@app.get("/api/admin/inventory/alerts")
+def inventory_alerts():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("products?select=id,name,sku,inventory_quantity",token=token);rows=rows if isinstance(rows,list) else []
+ alerts=[]
+ for p in rows:
+  q=int(p.get("inventory_quantity") or 0)
+  if q<=0:alerts.append({"type":"OUT_OF_STOCK","severity":"HIGH","product":p.get("name"),"sku":p.get("sku"),"quantity":q})
+  elif q<=5:alerts.append({"type":"LOW_STOCK","severity":"MEDIUM","product":p.get("name"),"sku":p.get("sku"),"quantity":q})
+ return jsonify(ok=True,count=len(alerts),alerts=alerts)
+
+@app.get("/api/admin/inventory/intelligence")
+def inventory_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("products?select=name,inventory_quantity,cost_price",token=token);rows=rows if isinstance(rows,list) else []
+ insights=[]
+ for p in rows:
+  q=int(p.get("inventory_quantity") or 0)
+  if q<=5:insights.append({"type":"REPLENISHMENT","product":p.get("name"),"quantity":q,"priority":"URGENT" if q<=0 else "HIGH","recommendation":"Replenish inventory before stockout"})
+ return jsonify(ok=True,insights=insights)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
