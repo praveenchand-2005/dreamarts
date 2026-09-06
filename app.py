@@ -608,6 +608,22 @@ def measure_outcome(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"outcome_measurement":json.dumps(outcome),"updated_at":outcome["measured_at"]},token=token)
  return jsonify(ok=True,outcome=outcome)
 
+@app.post("/api/admin/agent-tasks/<task_id>/learn-outcome")
+def learn_from_outcome(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ raw=task.get("outcome_measurement")
+ if not raw:return jsonify(error="Measure outcome first"),400
+ try:out=json.loads(raw) if isinstance(raw,str) else raw
+ except:return jsonify(error="Invalid outcome"),400
+ agent=task.get("agent","Unknown Agent");improved=out.get("assessment")=="IMPROVED";score=100 if improved else 25
+ event={"agent":agent,"task_id":task_id,"outcome_score":score,"assessment":out.get("assessment"),"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"outcome_learning":json.dumps(event),"updated_at":event["recorded_at"]},token=token)
+ # Return an explicit learning signal; recommendation-quality engines can consume this task history.
+ return jsonify(ok=True,learning_event=event,trust_signal={"agent":agent,"direction":"UP" if improved else "DOWN","strength":"HIGH" if score in (100,25) else "MEDIUM"})
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
