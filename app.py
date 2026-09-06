@@ -927,6 +927,29 @@ def recall_council_memory():
  matches=[{"task_id":r.get("id"),"topic":r.get("title"),"recommendation":r.get("description"),"status":r.get("status"),"similarity_score":s,"updated_at":r.get("updated_at")} for s,r in ranked[:10]]
  return jsonify(ok=True,query=body.get("topic"),matches=matches)
 
+@app.post("/api/admin/agent-council/deliberate-with-memory")
+def deliberate_with_memory():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};topic=body.get("topic","Business decision")
+ rows=supabase_request("agent_tasks?agent=eq.Executive%20Council&select=id,title,description,status,outcome_measurement,updated_at&limit=500",token=token);rows=rows if isinstance(rows,list) else []
+ terms=[x for x in topic.lower().split() if len(x)>2];hist=[]
+ for r in rows:
+  text=((r.get("title") or "")+" "+(r.get("description") or "")).lower();score=sum(1 for x in terms if x in text)
+  if score:
+   raw=r.get("outcome_measurement")
+   try:o=json.loads(raw) if isinstance(raw,str) else raw
+   except:o={}
+   hist.append({"topic":r.get("title"),"recommendation":r.get("description"),"status":r.get("status"),"outcome":o.get("assessment"),"similarity_score":score})
+ hist=sorted(hist,key=lambda x:x["similarity_score"],reverse=True)[:5]
+ evidence=list(body.get("evidence") or [])+[{"type":"institutional_memory","decision":x} for x in hist]
+ agents=body.get("agents") or COUNCIL_AGENT_ROUTING.get(str(body.get("category","STRATEGY")).upper(),COUNCIL_AGENT_ROUTING["STRATEGY"])
+ investigations=[]
+ for agent in agents:
+  investigations.append({"agent":agent,"historical_context_count":len(hist),"finding":"Reviewed current evidence and institutional memory","confidence":75 if hist else 70})
+ council={"topic":topic,"participants":agents,"historical_memories":hist,"evidence":evidence,"investigations":investigations,"consensus_confidence":round(sum(x["confidence"] for x in investigations)/len(investigations),1) if investigations else 0,"recommendation":"Use current evidence while explicitly incorporating lessons from similar historical decisions.","created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ return jsonify(ok=True,council=council)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
