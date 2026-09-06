@@ -1559,6 +1559,44 @@ def ai_event_signals():
  if active>=10:events.append({"event_type":"OPERATIONS_BOTTLENECK","data":{"active_orders":active}})
  return jsonify(ok=True,count=len(events),events=events)
 
+AI_RECOMMENDATIONS=[]
+
+@app.post("/api/admin/ai/recommendations")
+def create_ai_recommendation():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};title=str(b.get("title","")).strip();recommendation=str(b.get("recommendation","")).strip()
+ if not title or not recommendation:return jsonify(error="title and recommendation are required"),400
+ risk=str(b.get("risk","MEDIUM")).upper();confidence=max(0,min(100,float(b.get("confidence",50))))
+ rid="rec_"+uuid.uuid4().hex[:12];item={"id":rid,"title":title,"recommendation":recommendation,"source_event":b.get("source_event"),"risk":risk,"confidence":confidence,"status":"PENDING_APPROVAL","created_at":datetime.datetime.utcnow().isoformat()+"Z","decision":None}
+ AI_RECOMMENDATIONS.append(item);return jsonify(ok=True,recommendation=item)
+
+@app.get("/api/admin/ai/recommendations")
+def list_ai_recommendations():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ status=request.args.get("status");rows=[x for x in AI_RECOMMENDATIONS if not status or x["status"]==status.upper()]
+ return jsonify(ok=True,count=len(rows),recommendations=rows)
+
+@app.post("/api/admin/ai/recommendations/<recommendation_id>/decision")
+def decide_ai_recommendation(recommendation_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};decision=str(b.get("decision","")).upper()
+ if decision not in ["APPROVED","REJECTED","MODIFIED"]:return jsonify(error="decision must be APPROVED, REJECTED or MODIFIED"),400
+ item=next((x for x in AI_RECOMMENDATIONS if x["id"]==recommendation_id),None)
+ if not item:return jsonify(error="recommendation not found"),404
+ item["status"]=decision;item["decision"]={"decision":decision,"comment":b.get("comment"),"decided_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ return jsonify(ok=True,recommendation=item)
+
+@app.get("/api/admin/ai/recommendations/summary")
+def ai_recommendation_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ counts={}
+ for x in AI_RECOMMENDATIONS:counts[x["status"]]=counts.get(x["status"],0)+1
+ return jsonify(ok=True,total=len(AI_RECOMMENDATIONS),by_status=counts,pending=sum(1 for x in AI_RECOMMENDATIONS if x["status"]=="PENDING_APPROVAL"))
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
