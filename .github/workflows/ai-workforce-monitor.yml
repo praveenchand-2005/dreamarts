@@ -12,6 +12,7 @@ jobs:
           DREAMARTS_AGENT_URL: ${{ secrets.DREAMARTS_AGENT_URL }}
           DREAMARTS_AGENT_TOKEN: ${{ secrets.DREAMARTS_AGENT_TOKEN }}
         run: |
-          curl --fail --silent --show-error -X POST "$DREAMARTS_AGENT_URL" \
+          curl --silent --show-error --max-time 30 -X POST "$DREAMARTS_AGENT_URL" \
             -H "Authorization: Bearer $DREAMARTS_AGENT_TOKEN" \
-            -H "Content-Type: application/json"
+            -H "Content-Type: application/json" \
+            -w "\nHTTP_STATUS:%{http_code}\n"
