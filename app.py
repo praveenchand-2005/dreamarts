@@ -481,6 +481,30 @@ def business_pulse_api():
   except:pass
  return jsonify(ok=True,pulse={"total_orders":len(orders),"paid_orders":len(paid),"paid_revenue":round(revenue,2),"orders_last_24h":len(recent),"aging_orders":len(aging),"average_order_value":round(revenue/len(paid),2) if paid else 0,"generated_at":now.isoformat()+"Z"},alerts=[{"severity":"HIGH","area":"OPERATIONS","message":f"{len(aging)} orders have been open for 72+ hours."}] if aging else [])
 
+@app.get("/api/admin/business-anomalies")
+def business_anomalies_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,created_at,amount,price,payment_status&limit=3000",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();an=[];today=[];previous=[];aging=0
+ for o in orders:
+  try:
+   ts=datetime.datetime.fromisoformat(str(o.get("created_at")).replace("Z","+00:00")).replace(tzinfo=None);age=(now-ts).total_seconds()/3600
+   if age<=24:today.append(o)
+   elif age<=48:previous.append(o)
+   if age>=72 and str(o.get("status","")).upper() not in ("COMPLETED","DELIVERED","CANCELLED"):aging+=1
+  except:pass
+ if len(previous)>=3:
+  change=round((len(today)-len(previous))/len(previous)*100,1)
+  if change<=-30:an.append({"type":"ORDER_VOLUME_DROP","severity":"HIGH","message":f"Order volume dropped {abs(change)}% compared with the previous 24-hour period.","value":change})
+ paid_today=sum(float(o.get("amount") or o.get("price") or 0) for o in today if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"))
+ paid_prev=sum(float(o.get("amount") or o.get("price") or 0) for o in previous if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"))
+ if paid_prev>0:
+  change=round((paid_today-paid_prev)/paid_prev*100,1)
+  if change<=-30:an.append({"type":"REVENUE_DROP","severity":"HIGH","message":f"Paid revenue dropped {abs(change)}% versus the previous 24-hour period.","value":change})
+ if aging>=3:an.append({"type":"ORDER_AGING","severity":"HIGH" if aging>=10 else "MEDIUM","message":f"{aging} orders have remained open for more than 72 hours.","value":aging})
+ return jsonify(ok=True,count=len(an),anomalies=an,generated_at=now.isoformat()+"Z")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
