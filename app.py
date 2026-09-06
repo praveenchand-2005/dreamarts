@@ -1701,27 +1701,34 @@ def record_ai_execution_outcome(execution_id):
  if not item:return jsonify(error="execution not found"),404
  return jsonify(ok=True,execution=item,persistence_mode=mode)
 
+def ai_learning_store(item,token):
+ rows=ai_repo_insert("ai_learning_memory",item,token)
+ if rows is None:AI_LEARNING_MEMORY.append(item);return item,"memory_fallback"
+ return rows[0] if isinstance(rows,list) and rows else item,"postgres"
+def ai_learning_rows(token):
+ rows=ai_repo_get("ai_learning_memory",token,"select=*&order=created_at.desc")
+ return rows if rows is not None else AI_LEARNING_MEMORY
+
 @app.post("/api/admin/ai/executions/<execution_id>/learn")
 def learn_from_ai_execution(execution_id):
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- x=next((e for e in AI_EXECUTION_LOG if e["id"]==execution_id),None)
+ token=auth.split(" ",1)[1];x=ai_execution_find(execution_id,token)
  if not x:return jsonify(error="execution not found"),404
  if x.get("status")!="OUTCOME_RECORDED":return jsonify(error="outcome must be recorded before learning"),409
- if x.get("learning_id"):return jsonify(ok=True,learning=next((l for l in AI_LEARNING_MEMORY if l["id"]==x["learning_id"]),None),already_learned=True)
- outcome=x.get("outcome") or {};metrics=outcome.get("metrics") or {};result=str(outcome.get("result") or "")
- lesson="Execution outcome recorded; future decisions should consider this action and measured result."
- if any(v is not None and isinstance(v,(int,float)) and v<0 for v in metrics.values()):lesson="Negative measurable outcome detected; reduce confidence in similar future actions unless new evidence contradicts it."
+ if x.get("learning_id"):return jsonify(ok=True,already_learned=True,learning_id=x["learning_id"])
+ outcome=x.get("outcome") or {};metrics=outcome.get("metrics") or {};result=str(outcome.get("result") or "");lesson="Execution outcome recorded; future decisions should consider this action and measured result."
+ if any(isinstance(v,(int,float)) and v<0 for v in metrics.values()):lesson="Negative measurable outcome detected; reduce confidence in similar future actions unless new evidence contradicts it."
  elif result:lesson="Observed outcome: "+result[:500]
  lid="learn_"+uuid.uuid4().hex[:12];learning={"id":lid,"execution_id":execution_id,"recommendation_id":x.get("recommendation_id"),"action":x.get("action"),"lesson":lesson,"outcome":outcome,"created_at":datetime.datetime.utcnow().isoformat()+"Z"}
- AI_LEARNING_MEMORY.append(learning);x["learning_id"]=lid;x["status"]="LEARNED"
- return jsonify(ok=True,learning=learning)
+ stored,mode=ai_learning_store(learning,token);ai_repo_update("ai_executions",execution_id,{"learning_id":lid,"status":"LEARNED"},token);x["learning_id"]=lid;x["status"]="LEARNED"
+ return jsonify(ok=True,learning=stored,persistence_mode=mode)
 
 @app.get("/api/admin/ai/memory/learning")
 def ai_learning_memory():
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- return jsonify(ok=True,count=len(AI_LEARNING_MEMORY),memories=AI_LEARNING_MEMORY)
+ rows=ai_learning_rows(token);return jsonify(ok=True,count=len(rows),memories=rows)
 
 @app.post("/api/admin/ai/memory/recall")
 def recall_ai_learning():
