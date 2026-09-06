@@ -155,6 +155,14 @@ def generate_agent_tasks(token):
    if isinstance(result,list):created.append(result[0])
  return created
 
+@app.post("/api/admin/agents/run")
+def run_agents_now():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ created=generate_agent_tasks(token)
+ return jsonify(ok=True,created=len(created),tasks=created,ran_at=datetime.datetime.utcnow().isoformat()+"Z")
+
 @app.get("/api/admin/agent-tasks")
 def agent_tasks():
  auth=request.headers.get("Authorization","")
