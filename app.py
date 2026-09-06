@@ -152,7 +152,15 @@ def approve_agent_action():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  b=request.get_json(silent=True) or {};order_number=b.get("order_number");action_type=b.get("type")
  if not order_number or not action_type:return jsonify(error="Missing action data."),400
- return jsonify(ok=True,message="Action approved and recorded for operations workflow.",order_number=order_number,type=action_type)
+ # Execute only bounded, reversible workflow actions after approval.
+ if action_type=="QC_FOLLOWUP":
+  supabase_request("order_qc?order_number=eq."+order_number,method="PATCH",body={"qc_status":"PENDING"},token=token)
+  create_order_notification(token,order_number,"QC follow-up approved","Our operations team has been assigned a quality-control follow-up.")
+ elif action_type=="DELAY_ALERT":
+  create_order_notification(token,order_number,"Production update","Your order is receiving an operations review. We will keep you updated on progress.")
+  supabase_request("agent_action_log",method="POST",body={"order_number":order_number,"action_type":action_type,"status":"EXECUTED"},token=token)
+ else:return jsonify(error="Unsupported action type."),400
+ return jsonify(ok=True,message="Approved action executed successfully.",order_number=order_number,type=action_type,status="EXECUTED")
 
 @app.get("/api/admin/recommendations")
 def admin_recommendations():
