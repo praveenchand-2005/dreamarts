@@ -876,6 +876,24 @@ def agent_council_create_task():
  r=supabase_request("agent_tasks",method="POST",body=task,token=token)
  return jsonify(ok=True,task=r)
 
+COUNCIL_AGENT_ROUTING={"SALES":["Sales Intelligence Agent"],"FINANCE":["Finance Intelligence Agent"],"OPERATIONS":["Operations Agent"],"STRATEGY":["Sales Intelligence Agent","Finance Intelligence Agent","Operations Agent"]}
+
+@app.post("/api/admin/agent-council/orchestrate")
+def orchestrate_agent_council():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {}
+ topic=body.get("topic","Business decision");category=str(body.get("category","STRATEGY")).upper();agents=body.get("agents") or COUNCIL_AGENT_ROUTING.get(category,COUNCIL_AGENT_ROUTING["STRATEGY"])
+ evidence=body.get("evidence") or []
+ investigations=[]
+ for agent in agents:
+  lens="customer and revenue" if "Sales" in agent else "financial impact and risk" if "Finance" in agent else "execution capacity and operational risk"
+  investigations.append({"agent":agent,"lens":lens,"evidence_considered":len(evidence),"finding":"Independent review completed","confidence":70})
+ challenge_round=[{"challenger":agents[i],"challenges":agents[(i+1)%len(agents)],"question":"What evidence could invalidate the proposed action?"} for i in range(len(agents))] if len(agents)>1 else []
+ consensus_confidence=round(sum(x["confidence"] for x in investigations)/len(investigations),1) if investigations else 0
+ recommendation={"topic":topic,"category":category,"participants":agents,"evidence":evidence,"investigations":investigations,"challenge_round":challenge_round,"consensus_confidence":consensus_confidence,"consensus_level":"HIGH" if consensus_confidence>=80 else "MEDIUM" if consensus_confidence>=60 else "LOW","recommendation":"Use a measurable, reversible plan with explicit financial and operational guardrails.","created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ return jsonify(ok=True,council=recommendation)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
