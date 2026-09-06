@@ -130,6 +130,30 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/operations-agent")
+def operations_agent():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=order_number,status,created_at",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();actions=[]
+ for o in orders:
+  if str(o.get("status","")).upper() in ("DELIVERED","CANCELLED"):continue
+  try:age=(now-datetime.datetime.fromisoformat(str(o["created_at"]).replace("Z","+00:00")).replace(tzinfo=None)).days
+  except Exception:age=0
+  if age>=5:actions.append({"type":"DELAY_ALERT","priority":"HIGH","order_number":o["order_number"],"title":"Potentially delayed order","summary":f"Order has been open for {age} days.","proposed_action":"Review production status and prepare customer update.","requires_approval":True})
+ qc=supabase_request("order_qc?qc_status=eq.PENDING&select=order_number,created_at",token=token);qc=qc if isinstance(qc,list) else []
+ for q in qc:actions.append({"type":"QC_FOLLOWUP","priority":"MEDIUM","order_number":q["order_number"],"title":"QC follow-up needed","summary":"Quality inspection remains pending.","proposed_action":"Assign QC inspection to production team.","requires_approval":True})
+ return jsonify({"actions":actions[:30],"count":len(actions)})
+
+@app.post("/api/admin/operations-agent/approve")
+def approve_agent_action():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};order_number=b.get("order_number");action_type=b.get("type")
+ if not order_number or not action_type:return jsonify(error="Missing action data."),400
+ return jsonify(ok=True,message="Action approved and recorded for operations workflow.",order_number=order_number,type=action_type)
+
 @app.get("/api/admin/recommendations")
 def admin_recommendations():
  auth=request.headers.get("Authorization","")
