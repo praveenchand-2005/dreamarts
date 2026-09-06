@@ -130,6 +130,31 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/insights")
+def admin_insights():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=*",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();days={}
+ engines={};shapes={};widths=[];pipeline_age=[]
+ for o in orders:
+  created=str(o.get("created_at") or "")[:10]
+  if created:days[created]=days.get(created,0)+1
+  try:
+   n=json.loads(o.get("notes") or "{}");e=n.get("selected_engine")
+   if e:engines[e]=engines.get(e,0)+1
+  except Exception:pass
+  if o.get("artwork_shape"):shapes[o["artwork_shape"]]=shapes.get(o["artwork_shape"],0)+1
+  if o.get("artwork_width_mm"):widths.append(float(o["artwork_width_mm"]))
+  if str(o.get("status","")).upper() not in ("DELIVERED","CANCELLED"):
+   try:pipeline_age.append((now-datetime.datetime.fromisoformat(str(o["created_at"]).replace("Z","+00:00")).replace(tzinfo=None)).days)
+   except Exception:pass
+ recent=sum(v for k,v in days.items() if k>=str((now-datetime.timedelta(days=7)).date()))
+ paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ revenue=sum(float(o.get("amount") or o.get("price") or 0) for o in paid)
+ return jsonify({"forecast":{"next_7_days_orders":round(recent*1.0),"signal":"baseline based on last 7 days"},"demand":{"top_engines":sorted(engines.items(),key=lambda x:x[1],reverse=True)[:5],"top_shapes":sorted(shapes.items(),key=lambda x:x[1],reverse=True)[:5],"average_width_mm":round(sum(widths)/len(widths),1) if widths else 0},"operations":{"open_orders":len(pipeline_age),"average_open_order_age_days":round(sum(pipeline_age)/len(pipeline_age),1) if pipeline_age else 0},"finance":{"paid_revenue":revenue,"paid_order_count":len(paid),"average_paid_order_value":round(revenue/len(paid),2) if paid else 0},"founder_signals":[("Demand is building" if recent>=3 else "Demand sample still small"),("Production attention needed" if pipeline_age and sum(pipeline_age)/len(pipeline_age)>5 else "Production pipeline healthy"),("Best-selling engine: "+sorted(engines,key=engines.get,reverse=True)[0] if engines else "Collect more engine selection data")]})
+
 @app.get("/api/admin/analytics")
 def admin_analytics():
  auth=request.headers.get("Authorization","")
