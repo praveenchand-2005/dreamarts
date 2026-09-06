@@ -1449,6 +1449,47 @@ def finance_executive():
  rev=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper() in ["PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED"]);recv=sum(order_financial_amount(o) for o in orders if str(o.get("status","")).upper()=="PAYMENT PENDING")
  return jsonify(ok=True,revenue_recognized=round(rev,2),receivables=round(recv,2),financial_attention=["Connect expense ledger for true net profit"] if rev else ["No recognized revenue yet"])
 
+def inventory_reserve_for_order(token,order_number):
+ orders=supabase_request("orders?order_number=eq."+str(order_number)+"&select=notes",token=token)
+ if not isinstance(orders,list) or not orders:return {"ok":False,"reason":"order_not_found"}
+ try:n=json.loads(orders[0].get("notes") or "{}")
+ except:n={}
+ items=n.get("items") or n.get("inventory_items") or []
+ if not items:return {"ok":False,"reason":"no_inventory_items_linked","reserved":[]}
+ reserved=[];shortages=[]
+ for item in items:
+  pid=str(item.get("product_id") or "");need=max(1,int(item.get("quantity") or 1))
+  if not pid:continue
+  p=supabase_request("products?id=eq."+pid+"&select=id,name,inventory_quantity",token=token)
+  if not isinstance(p,list) or not p:shortages.append({"product_id":pid,"reason":"product_not_found"});continue
+  q=int(p[0].get("inventory_quantity") or 0)
+  if q<need:shortages.append({"product_id":pid,"product":p[0].get("name"),"available":q,"required":need});continue
+  newq=q-need;supabase_request("products?id=eq."+pid,method="PATCH",body={"inventory_quantity":newq,"updated_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
+  reserved.append({"product_id":pid,"product":p[0].get("name"),"consumed":need,"remaining":newq})
+ return {"ok":not shortages,"reserved":reserved,"shortages":shortages}
+
+@app.post("/api/admin/orders/<order_number>/inventory-reserve")
+def order_inventory_reserve(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];result=inventory_reserve_for_order(token,order_number)
+ return jsonify(ok=result["ok"],order_number=order_number,**result), (200 if result["ok"] else 409)
+
+@app.get("/api/admin/inventory/demand")
+def inventory_demand():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=notes,status",token=token);orders=orders if isinstance(orders,list) else []
+ demand={}
+ for o in orders:
+  if str(o.get("status","")).upper()=="CANCELLED":continue
+  try:items=json.loads(o.get("notes") or "{}").get("items") or []
+  except:items=[]
+  for i in items:
+   pid=i.get("product_id")
+   if pid:demand[str(pid)]=demand.get(str(pid),0)+int(i.get("quantity") or 1)
+ return jsonify(ok=True,demand=[{"product_id":k,"units_requested":v} for k,v in sorted(demand.items(),key=lambda x:x[1],reverse=True)])
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
