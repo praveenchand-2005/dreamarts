@@ -1606,16 +1606,23 @@ def list_ai_recommendations():
  status=request.args.get("status");status=status.upper() if status else None;rows=ai_recommendation_rows(token,status)
  return jsonify(ok=True,count=len(rows),recommendations=rows)
 
+def ai_recommendation_decide(rid,decision_obj,token):
+ item=ai_recommendation_find(rid,token)
+ if not item:return None,"not_found"
+ item["status"]=decision_obj["decision"];item["decision"]=decision_obj
+ db=ai_repo_update("ai_recommendations",rid,{"status":item["status"],"decision":item["decision"]},token)
+ return item,"postgres" if db is not None else "memory_fallback"
+
 @app.post("/api/admin/ai/recommendations/<recommendation_id>/decision")
 def decide_ai_recommendation(recommendation_id):
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- b=request.get_json(silent=True) or {};decision=str(b.get("decision","")).upper()
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};decision=str(b.get("decision","")).upper()
  if decision not in ["APPROVED","REJECTED","MODIFIED"]:return jsonify(error="decision must be APPROVED, REJECTED or MODIFIED"),400
- item=ai_recommendation_find(recommendation_id,token)
+ obj={"decision":decision,"comment":b.get("comment"),"decided_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ item,mode=ai_recommendation_decide(recommendation_id,obj,token)
  if not item:return jsonify(error="recommendation not found"),404
- item["status"]=decision;item["decision"]={"decision":decision,"comment":b.get("comment"),"decided_at":datetime.datetime.utcnow().isoformat()+"Z"}
- return jsonify(ok=True,recommendation=item)
+ return jsonify(ok=True,recommendation=item,persistence_mode=mode)
 
 @app.get("/api/admin/ai/recommendations/summary")
 def ai_recommendation_summary():
