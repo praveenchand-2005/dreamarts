@@ -304,14 +304,18 @@ def executive_decision_queue(token):
  outcomes=outcome_tracking(token)
  agent_perf=outcomes.get("agents",{})
  quality=recommendation_quality(token)
+ drift=recommendation_drift(token)
+ penalties={x["agent"]:min(0.35,x["quality_drop"]/100) for x in drift.get("alerts",[])}
  decisions=[]
  for x in ranked:
   perf=agent_perf.get(x.get("agent"),{})
-  trust=quality.get(x.get("agent"),{}).get("quality_score",50)/100
+  base_trust=quality.get(x.get("agent"),{}).get("quality_score",50)/100
+  penalty=penalties.get(x.get("agent"),0)
+  trust=max(0.1,base_trust-penalty)
   execution=perf.get("execution_rate",0)/100
   confidence=min(0.97,0.35+execution*0.25+trust*0.4)
   score=round(x.get("impact_score",0)*0.65+confidence*35)
-  decisions.append({**x,"trust_score":round(trust*100,1),"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
+  decisions.append({**x,"base_trust_score":round(base_trust*100,1),"calibration_penalty":round(penalty*100,1),"trust_score":round(trust*100,1),"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
  return sorted(decisions,key=lambda x:x["decision_score"],reverse=True)
 
 @app.get("/api/admin/executive-decisions")
