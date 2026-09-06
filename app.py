@@ -1243,6 +1243,43 @@ def operations_intelligence():
  if top and top[0][1]>=3:insights.append({"type":"BOTTLENECK","severity":"HIGH" if top[0][1]>=10 else "MEDIUM","stage":top[0][0],"orders":top[0][1],"recommendation":"Investigate capacity and workflow at this stage"})
  return jsonify(ok=True,insights=insights)
 
+@app.get("/api/admin/analytics/overview")
+def analytics_overview():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=customer_id,total_amount,status,created_at",token=token);products=supabase_request("products?select=id,name,selling_price,cost_price",token=token);profiles=supabase_request("profiles?select=id",token=token)
+ orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else [];profiles=profiles if isinstance(profiles,list) else []
+ valid=[o for o in orders if str(o.get("status","")).upper()!="CANCELLED"];revenue=sum(float(o.get("total_amount") or 0) for o in valid)
+ delivered=sum(1 for o in orders if str(o.get("status","")).upper()=="DELIVERED");cancelled=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED")
+ active=sum(1 for o in orders if str(o.get("status","")).upper() not in ["DELIVERED","CANCELLED"])
+ customers_with_orders=len(set(o.get("customer_id") for o in orders if o.get("customer_id")))
+ return jsonify(ok=True,generated_at=datetime.datetime.utcnow().isoformat()+"Z",kpis={"revenue":round(revenue,2),"total_orders":len(orders),"average_order_value":round(revenue/len(valid),2) if valid else 0,"delivered_orders":delivered,"active_orders":active,"cancellation_rate":round(cancelled/len(orders)*100,2) if orders else 0,"total_customers":len(profiles),"customers_with_orders":customers_with_orders,"product_count":len(products)})
+
+@app.get("/api/admin/analytics/health")
+def business_health():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount",token=token);products=supabase_request("products?select=selling_price,cost_price",token=token)
+ orders=orders if isinstance(orders,list) else [];products=products if isinstance(products,list) else []
+ cancellation=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED")/(len(orders) or 1)
+ low=sum(1 for p in products if (float(p.get("selling_price") or 0)>0 and (float(p.get("selling_price") or 0)-float(p.get("cost_price") or 0))/float(p.get("selling_price") or 1)<.15))
+ score=100-cancellation*100*.5-(low/(len(products) or 1))*30
+ score=round(max(0,min(100,score)),1);status="EXCELLENT" if score>=85 else "HEALTHY" if score>=70 else "ATTENTION" if score>=50 else "CRITICAL"
+ return jsonify(ok=True,business_health_score=score,status=status,factors={"cancellation_rate":round(cancellation*100,2),"low_margin_products":low,"total_products":len(products)})
+
+@app.get("/api/admin/analytics/executive-summary")
+def analytics_executive_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount",token=token);orders=orders if isinstance(orders,list) else []
+ revenue=sum(float(o.get("total_amount") or 0) for o in orders if str(o.get("status","")).upper()!="CANCELLED");active=sum(1 for o in orders if str(o.get("status","")).upper() not in ["DELIVERED","CANCELLED"])
+ attention=[]
+ if active>=5:attention.append("Operational workload requires monitoring")
+ canc=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED")
+ if orders and canc/len(orders)>.1:attention.append("Cancellation rate requires investigation")
+ return jsonify(ok=True,summary={"revenue":round(revenue,2),"active_orders":active,"total_orders":len(orders),"attention_required":attention,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"})
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
