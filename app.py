@@ -130,6 +130,24 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/analytics")
+def admin_analytics():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=*",token=token)
+ orders=orders if isinstance(orders,list) else []
+ paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ revenue=sum(float(o.get("amount") or o.get("price") or 0) for o in paid)
+ status={}
+ for o in orders:status[o.get("status","UNKNOWN")]=status.get(o.get("status","UNKNOWN"),0)+1
+ qc=supabase_request("order_qc?select=qc_status",token=token);qc=qc if isinstance(qc,list) else []
+ approved=sum(1 for x in qc if x.get("qc_status")=="APPROVED")
+ reviews=supabase_request("order_reviews?select=rating",token=token);reviews=reviews if isinstance(reviews,list) else []
+ avg_rating=round(sum(float(x["rating"]) for x in reviews)/len(reviews),2) if reviews else 0
+ refs=supabase_request("referrals?select=successful_referrals,reward_balance",token=token);refs=refs if isinstance(refs,list) else []
+ return jsonify({"orders_total":len(orders),"paid_orders":len(paid),"revenue":revenue,"order_status":status,"qc_total":len(qc),"qc_approved":approved,"qc_pass_rate":round(approved*100/len(qc),1) if qc else 0,"reviews_total":len(reviews),"average_rating":avg_rating,"referral_customers":len(refs),"successful_referrals":sum(int(x.get("successful_referrals") or 0) for x in refs),"reward_liability":sum(float(x.get("reward_balance") or 0) for x in refs)})
+
 @app.get("/api/admin/orders/<order_number>/qc")
 def get_qc(order_number):
  auth=request.headers.get("Authorization","")
