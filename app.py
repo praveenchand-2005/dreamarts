@@ -250,6 +250,28 @@ def order_timeline(status):
  idx=stages.index(status) if status in stages else 0
  return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
 
+@app.post("/api/referral/attribute")
+def attribute_referral():
+ b=request.get_json(silent=True) or {};code=str(b.get("code","")).upper();customer=b.get("customer_id")
+ if not code or not customer:return jsonify(error="Missing referral code or customer."),400
+ refs=supabase_request("referrals?code=eq."+code+"&select=referrer_id")
+ if not isinstance(refs,list) or not refs:return jsonify(error="Invalid referral code."),404
+ if refs[0]["referrer_id"]==customer:return jsonify(error="Self referral is not allowed."),400
+ existing=supabase_request("referral_attributions?referred_customer_id=eq."+customer+"&select=id")
+ if existing:return jsonify(ok=True,already_attributed=True)
+ r=supabase_request("referral_attributions",method="POST",body={"referral_code":code,"referrer_id":refs[0]["referrer_id"],"referred_customer_id":customer,"status":"ATTRIBUTED"})
+ if isinstance(r,dict) and "_error" in r:return jsonify(error="Could not attribute referral."),400
+ return jsonify(ok=True)
+
+def qualify_referral_for_order(token,user_id,order_number):
+ attrs=supabase_request("referral_attributions?referred_customer_id=eq."+user_id+"&status=eq.ATTRIBUTED&select=*&limit=1",token=token)
+ if not isinstance(attrs,list) or not attrs:return
+ x=attrs[0];reward=float(os.environ.get("REFERRAL_REWARD_AMOUNT","100"))
+ supabase_request("referral_attributions?id=eq."+x["id"],method="PATCH",body={"status":"QUALIFIED","qualified_order_number":order_number,"reward_amount":reward},token=token)
+ refs=supabase_request("referrals?referrer_id=eq."+x["referrer_id"]+"&select=reward_balance,successful_referrals&limit=1",token=token)
+ if isinstance(refs,list) and refs:
+  supabase_request("referrals?referrer_id=eq."+x["referrer_id"],method="PATCH",body={"reward_balance":float(refs[0].get("reward_balance") or 0)+reward,"successful_referrals":int(refs[0].get("successful_referrals") or 0)+1},token=token)
+
 @app.get("/api/my-referral")
 def my_referral():
  auth=request.headers.get("Authorization","")
