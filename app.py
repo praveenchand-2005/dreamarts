@@ -543,6 +543,23 @@ def investigate_agent_task(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"INVESTIGATED","investigation_report":json.dumps(report),"updated_at":now.isoformat()+"Z"},token=token)
  return jsonify(ok=True,report=report)
 
+@app.post("/api/admin/agent-tasks/<task_id>/recommend")
+def recommend_from_investigation(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token)
+ task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ raw=task.get("investigation_report")
+ if not raw:return jsonify(error="Task must be investigated first"),400
+ try:report=json.loads(raw) if isinstance(raw,str) else raw
+ except:return jsonify(error="Invalid investigation report"),400
+ actions=report.get("recommended_actions",[]);priority=task.get("priority","MEDIUM")
+ impact={"CRITICAL":"Very high operational/business impact","HIGH":"High business impact","MEDIUM":"Moderate business impact"}.get(priority,"Limited business impact")
+ recommendation={"action":actions[0] if actions else "Review investigation findings.","expected_impact":impact,"risk_level":priority,"confidence":report.get("confidence",0.65),"requires_founder_decision":True,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"RECOMMENDED","recommendation":json.dumps(recommendation),"updated_at":recommendation["generated_at"]},token=token)
+ return jsonify(ok=True,task_id=task_id,recommendation=recommendation)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
