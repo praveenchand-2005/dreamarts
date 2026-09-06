@@ -130,6 +130,24 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/ai-employees")
+def ai_employees():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=order_number,status,created_at",token=token);orders=orders if isinstance(orders,list) else []
+ qc=supabase_request("order_qc?select=order_number,qc_status",token=token);qc=qc if isinstance(qc,list) else []
+ reviews=supabase_request("order_reviews?select=rating,created_at",token=token);reviews=reviews if isinstance(reviews,list) else []
+ pending_qc=sum(1 for x in qc if x.get("qc_status")=="PENDING")
+ open_orders=sum(1 for x in orders if str(x.get("status","")).upper() not in ("DELIVERED","CANCELLED"))
+ low_reviews=sum(1 for x in reviews if float(x.get("rating") or 5)<=2)
+ return jsonify({"employees":[
+ {"id":"production","name":"Production Agent","status":"ACTIVE","mission":"Monitor production queue and delivery risk.","workload":open_orders,"signal":"Review capacity" if open_orders>10 else "Queue healthy"},
+ {"id":"quality","name":"Quality Agent","status":"ACTIVE","mission":"Monitor QC outcomes and unresolved inspections.","workload":pending_qc,"signal":"QC follow-up required" if pending_qc else "Quality queue clear"},
+ {"id":"customer_success","name":"Customer Success Agent","status":"ACTIVE","mission":"Monitor customer satisfaction and service recovery.","workload":low_reviews,"signal":"Low-rating reviews require attention" if low_reviews else "Customer satisfaction stable"},
+ {"id":"growth","name":"Growth Agent","status":"ACTIVE","mission":"Monitor referrals, reviews and gallery growth.","workload":len(reviews),"signal":"Continue social-proof collection"}
+ ]})
+
 @app.get("/api/admin/operations-agent")
 def operations_agent():
  auth=request.headers.get("Authorization","")
