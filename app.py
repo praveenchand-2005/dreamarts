@@ -624,6 +624,36 @@ def learn_from_outcome(task_id):
  # Return an explicit learning signal; recommendation-quality engines can consume this task history.
  return jsonify(ok=True,learning_event=event,trust_signal={"agent":agent,"direction":"UP" if improved else "DOWN","strength":"HIGH" if score in (100,25) else "MEDIUM"})
 
+@app.get("/api/admin/agent-outcome-trust")
+def agent_outcome_trust():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ tasks=supabase_request("agent_tasks?select=agent,outcome_learning,outcome_measurement,updated_at&limit=5000",token=token);tasks=tasks if isinstance(tasks,list) else []
+ grouped={}
+ for t in tasks:
+  raw=t.get("outcome_learning")
+  if not raw:continue
+  try:e=json.loads(raw) if isinstance(raw,str) else raw
+  except:continue
+  agent=t.get("agent","Unknown Agent");grouped.setdefault(agent,[]).append(e.get("outcome_score",50))
+ result=[]
+ for agent,scores in grouped.items():
+  recent=scores[-10:];success=sum(1 for x in recent if x>=75);trust=round(sum(recent)/len(recent),1)
+  result.append({"agent":agent,"outcomes":len(scores),"recent_outcomes":len(recent),"success_rate":round(success/len(recent)*100,1),"outcome_trust_score":trust,"level":"HIGH" if trust>=80 else "MEDIUM" if trust>=55 else "LOW"})
+ return jsonify(ok=True,agents=sorted(result,key=lambda x:x["outcome_trust_score"],reverse=True))
+
+@app.post("/api/admin/agent-outcome-trust/recalculate")
+def recalculate_outcome_trust():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ data=agent_outcome_trust().get_json();agents=data.get("agents",[])
+ now=datetime.datetime.utcnow().isoformat()+"Z"
+ for x in agents:
+  supabase_request("agent_tasks?agent=eq."+x["agent"],method="PATCH",body={"outcome_trust_snapshot":json.dumps({"score":x["outcome_trust_score"],"level":x["level"],"calculated_at":now})},token=token)
+ return jsonify(ok=True,recalculated=len(agents),agents=agents,calculated_at=now)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
