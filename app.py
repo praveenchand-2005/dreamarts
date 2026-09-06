@@ -1039,6 +1039,45 @@ def predictive_forecast():
  opportunity={"detected":direction=="GROWING","message":metric+" has positive momentum"} if direction=="GROWING" else {"detected":False}
  return jsonify(ok=True,metric=metric,observations=len(vals),current_value=vals[-1],trend_per_period=round(trend,4),trend_direction=direction,forecast=forecast,confidence=confidence,volatility=round(volatility,4),early_warnings=warnings,opportunity=opportunity,generated_at=datetime.datetime.utcnow().isoformat()+"Z")
 
+@app.get("/api/admin/products")
+def list_products():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];r=supabase_request("products?select=*&order=created_at.desc",token=token)
+ return jsonify(ok=True,products=r if isinstance(r,list) else [])
+
+@app.post("/api/admin/products")
+def create_product():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ if not b.get("name"):return jsonify(error="Product name is required"),400
+ now=datetime.datetime.utcnow().isoformat()+"Z"
+ product={"name":b["name"],"description":b.get("description"),"sku":b.get("sku") or str(uuid.uuid4())[:8].upper(),"category":b.get("category"),"selling_price":b.get("selling_price",0),"cost_price":b.get("cost_price",0),"status":b.get("status","ACTIVE"),"image_url":b.get("image_url"),"created_at":now,"updated_at":now}
+ r=supabase_request("products",method="POST",body=product,token=token)
+ return jsonify(ok=True,product=r)
+
+@app.patch("/api/admin/products/<product_id>")
+def update_product(product_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};allowed=["name","description","sku","category","selling_price","cost_price","status","image_url","inventory_quantity"]
+ body={k:b[k] for k in allowed if k in b};body["updated_at"]=datetime.datetime.utcnow().isoformat()+"Z"
+ r=supabase_request("products?id=eq."+product_id,method="PATCH",body=body,token=token)
+ return jsonify(ok=True,product=r)
+
+@app.get("/api/admin/products/intelligence")
+def product_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("products?select=*&limit=1000",token=token);rows=rows if isinstance(rows,list) else []
+ analysis=[]
+ for p in rows:
+  sell=float(p.get("selling_price") or 0);cost=float(p.get("cost_price") or 0);margin=sell-cost;margin_pct=round((margin/sell*100),2) if sell else 0;stock=p.get("inventory_quantity")
+  analysis.append({"id":p.get("id"),"name":p.get("name"),"sku":p.get("sku"),"selling_price":sell,"cost_price":cost,"unit_margin":round(margin,2),"margin_percent":margin_pct,"inventory_quantity":stock,"health":"HIGH_MARGIN" if margin_pct>=40 else "LOW_MARGIN" if margin_pct<15 else "NORMAL"})
+ analysis.sort(key=lambda x:x["unit_margin"],reverse=True)
+ return jsonify(ok=True,count=len(analysis),products=analysis)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
