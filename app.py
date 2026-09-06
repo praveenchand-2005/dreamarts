@@ -130,6 +130,36 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/agent-tasks")
+def agent_tasks():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("agent_tasks?select=*&order=created_at.desc&limit=100",token=token)
+ return jsonify(rows if isinstance(rows,list) else [])
+
+@app.post("/api/admin/agent-tasks")
+def create_agent_task():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ required=["agent","title","priority"]
+ if any(not b.get(x) for x in required):return jsonify(error="Missing task fields."),400
+ row={"agent":b["agent"],"title":str(b["title"])[:500],"priority":b["priority"],"order_number":b.get("order_number"),"status":"PENDING","requires_approval":bool(b.get("requires_approval",True)),"proposed_action":b.get("proposed_action")}
+ r=supabase_request("agent_tasks",method="POST",body=row,token=token,prefer="return=representation")
+ return jsonify(r[0] if isinstance(r,list) and r else {"ok":True})
+
+@app.post("/api/admin/agent-tasks/<task_id>/approve")
+def approve_agent_task(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ task=supabase_request("agent_tasks?id=eq."+task_id+"&select=*&limit=1",token=token)
+ if not isinstance(task,list) or not task:return jsonify(error="Task not found."),404
+ t=task[0]
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","approved_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
+ return jsonify(ok=True,task_id=task_id,status="EXECUTED")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
