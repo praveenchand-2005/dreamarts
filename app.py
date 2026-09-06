@@ -522,6 +522,27 @@ def dispatch_business_anomalies():
   created.append({"agent":agent,"anomaly":x.get("type"),"result":r})
  return jsonify(ok=True,anomalies=len(anomalies),tasks_dispatched=len(created),created=created)
 
+@app.post("/api/admin/agent-tasks/<task_id>/investigate")
+def investigate_agent_task(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ orders=supabase_request("orders?select=status,created_at,amount,price,payment_status&limit=3000",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();open_orders=sum(1 for o in orders if str(o.get("status","")).upper() not in ("COMPLETED","DELIVERED","CANCELLED"))
+ paid=sum(1 for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"))
+ revenue=sum(float(o.get("amount") or o.get("price") or 0) for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS"))
+ typ=(task.get("title") or "").upper()
+ causes=[]
+ actions=[]
+ if "AGING" in typ:causes=["Fulfillment backlog or unresolved operational workflow.","Orders remaining in non-terminal statuses." ];actions=["Review oldest open orders first.","Assign fulfillment ownership and escalation deadlines."]
+ elif "REVENUE" in typ:causes=["Reduced paid order conversion or transaction value.","Possible payment or sales funnel degradation."];actions=["Compare traffic, checkout and payment success rates.","Review recent campaign and pricing changes."]
+ else:causes=["Demand or sales pipeline slowdown.","Possible acquisition, conversion or availability issue."];actions=["Compare acquisition sources across periods.","Review product availability and conversion funnel."]
+ report={"task_id":task_id,"agent":task.get("agent"),"investigated_at":now.isoformat()+"Z","business_snapshot":{"orders":len(orders),"open_orders":open_orders,"paid_orders":paid,"paid_revenue":round(revenue,2)},"probable_causes":causes,"recommended_actions":actions,"confidence":0.72}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"INVESTIGATED","investigation_report":json.dumps(report),"updated_at":now.isoformat()+"Z"},token=token)
+ return jsonify(ok=True,report=report)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
