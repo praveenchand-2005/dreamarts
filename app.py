@@ -1634,6 +1634,18 @@ def ai_recommendation_summary():
 
 AI_EXECUTION_LOG=[]
 
+def ai_execution_store(item,token):
+ rows=ai_repo_insert("ai_executions",item,token)
+ if rows is None:AI_EXECUTION_LOG.append(item);return item,"memory_fallback"
+ return rows[0] if isinstance(rows,list) and rows else item,"postgres"
+def ai_execution_find(eid,token):
+ rows=ai_repo_get("ai_executions",token,"id=eq."+str(eid)+"&select=*&limit=1")
+ if rows is not None:return rows[0] if rows else None
+ return next((x for x in AI_EXECUTION_LOG if x["id"]==eid),None)
+def ai_execution_rows(token):
+ rows=ai_repo_get("ai_executions",token,"select=*&order=created_at.desc")
+ return rows if rows is not None else AI_EXECUTION_LOG
+
 @app.post("/api/admin/ai/recommendations/<recommendation_id>/execute")
 def execute_ai_recommendation(recommendation_id):
  auth=request.headers.get("Authorization","")
@@ -1652,14 +1664,14 @@ def execute_ai_recommendation(recommendation_id):
  elif action=="CREATE_OPERATION_TASK":
   result["effect"]="Operations task authorized and recorded"
  else:result["effect"]="Experiment start authorized and recorded"
- AI_EXECUTION_LOG.append(result);item["status"]="EXECUTED";item["execution_id"]=eid
- return jsonify(ok=True,execution=result)
+ stored,mode=ai_execution_store(result,token);item["status"]="EXECUTED";item["execution_id"]=eid;ai_repo_update("ai_recommendations",recommendation_id,{"status":"EXECUTED"},token)
+ return jsonify(ok=True,execution=stored,persistence_mode=mode)
 
 @app.get("/api/admin/ai/executions")
 def list_ai_executions():
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- return jsonify(ok=True,count=len(AI_EXECUTION_LOG),executions=AI_EXECUTION_LOG)
+ rows=ai_execution_rows(token);return jsonify(ok=True,count=len(rows),executions=rows)
 
 @app.get("/api/admin/ai/executions/<execution_id>")
 def ai_execution_detail(execution_id):
