@@ -1375,6 +1375,36 @@ def notification_intelligence():
   if str(o.get("status","")).upper()=="PAYMENT PENDING":signals.append({"category":"PAYMENT","priority":"MEDIUM","message":"Payment pending for order "+str(o.get("order_number") or "")})
  return jsonify(ok=True,signals=signals)
 
+TEAM_ROLES={"OWNER":["*"],"ADMIN":["analytics","orders","products","customers","finance","operations","inventory","notifications","team"],"OPERATIONS":["orders","operations","inventory"],"FINANCE":["finance","analytics"],"SUPPORT":["customers","orders","notifications"],"VIEWER":["analytics"]}
+
+@app.get("/api/admin/team/roles")
+def team_roles():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,roles=TEAM_ROLES)
+
+@app.get("/api/admin/team")
+def team_members():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("profiles?select=id,email,full_name,phone,created_at",token=token);rows=rows if isinstance(rows,list) else []
+ return jsonify(ok=True,count=len(rows),members=[{**x,"role":"UNASSIGNED"} for x in rows])
+
+@app.post("/api/admin/team/access-check")
+def team_access_check():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};role=str(b.get("role","")).upper();module=str(b.get("module","")).lower()
+ if role not in TEAM_ROLES:return jsonify(error="Unknown role"),400
+ allowed="*" in TEAM_ROLES[role] or module in TEAM_ROLES[role]
+ return jsonify(ok=True,role=role,module=module,allowed=allowed)
+
+@app.get("/api/admin/team/audit-summary")
+def team_audit_summary():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,governance={"roles_defined":len(TEAM_ROLES),"principle":"least_privilege","approval_model":"role_based","audit_ready":True})
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
