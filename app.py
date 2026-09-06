@@ -82,6 +82,24 @@ def custom_order():
   return jsonify(ok=True,orderNumber=oid,status=order["status"],trackUrl="/track?order="+oid)
  except Exception as e: return jsonify(error="Could not create request: "+str(e)),500
 
+@app.get("/api/profile")
+def get_profile():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ return jsonify(supabase_request("profiles?select=*&limit=1",token=token))
+
+@app.patch("/api/profile")
+def update_profile():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ allowed={"full_name","phone","address_line1","address_line2","city","state","postal_code","country"}
+ patch={k:v for k,v in b.items() if k in allowed}
+ r=supabase_request("profiles",method="PATCH",body=patch,token=token,prefer="return=representation")
+ if isinstance(r,dict) and "_error" in r:return jsonify(error="Could not update profile.",details=r["_error"]),400
+ return jsonify(ok=True,profile=r[0] if isinstance(r,list) and r else None)
+
 @app.get("/api/my-notifications")
 def my_notifications():
  auth=request.headers.get("Authorization","")
