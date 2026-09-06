@@ -299,6 +299,25 @@ def autonomous_priorities_api():
  ranked=autonomous_priorities(auth.split(" ",1)[1])
  return jsonify(ok=True,count=len(ranked),priorities=ranked)
 
+def executive_decision_queue(token):
+ ranked=autonomous_priorities(token)
+ outcomes=outcome_tracking(token)
+ agent_perf=outcomes.get("agents",{})
+ decisions=[]
+ for x in ranked:
+  perf=agent_perf.get(x.get("agent"),{})
+  confidence=min(0.95,0.55+(perf.get("execution_rate",0)/200))
+  score=round(x.get("impact_score",0)*0.7+confidence*30)
+  decisions.append({**x,"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
+ return sorted(decisions,key=lambda x:x["decision_score"],reverse=True)
+
+@app.get("/api/admin/executive-decisions")
+def executive_decisions_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ q=executive_decision_queue(auth.split(" ",1)[1])
+ return jsonify(ok=True,summary={"act_now":sum(1 for x in q if x["decision"]=="ACT NOW"),"review_next":sum(1 for x in q if x["decision"]=="REVIEW NEXT"),"monitor":sum(1 for x in q if x["decision"]=="MONITOR")},decisions=q)
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
