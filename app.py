@@ -1531,13 +1531,20 @@ def ai_decision_context():
 AI_EVENT_ROUTING={"INVENTORY_STOCKOUT":{"agent":"inventory_intelligence","priority":"HIGH"},"LOW_STOCK":{"agent":"inventory_intelligence","priority":"MEDIUM"},"PAYMENT_PENDING":{"agent":"finance_intelligence","priority":"MEDIUM"},"HIGH_CANCELLATION":{"agent":"customer_intelligence","priority":"MEDIUM"},"OPERATIONS_BOTTLENECK":{"agent":"operations_intelligence","priority":"HIGH"}}
 
 @app.post("/api/admin/ai/events")
-def ai_business_event():
+def receive_ai_event():
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
- b=request.get_json(silent=True) or {};event_type=str(b.get("event_type","")).upper();data=b.get("data") or {}
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};event_type=str(b.get("event_type","")).upper();data=b.get("data") or {}
  if event_type not in AI_EVENT_ROUTING:return jsonify(error="Unknown event_type",supported=list(AI_EVENT_ROUTING)),400
- route=AI_EVENT_ROUTING[event_type]
- return jsonify(ok=True,event={"type":event_type,"data":data,"received_at":datetime.datetime.utcnow().isoformat()+"Z"},routing=route,next_step="Build live context and request governed AI analysis")
+ route=AI_EVENT_ROUTING[event_type];eid="evt_"+uuid.uuid4().hex[:12];item={"id":eid,"event_type":event_type,"data":data,"priority":route.get("priority"),"agent":route.get("agent"),"created_at":datetime.datetime.utcnow().isoformat()+"Z"};stored,mode=ai_event_store(item,token)
+ return jsonify(ok=True,event=stored,routing=route,persistence_mode=mode,next_step="Build live context and request governed AI analysis")
+
+@app.get("/api/admin/ai/events/history")
+def ai_event_history():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];event_type=request.args.get("event_type");rows=ai_event_rows(token,event_type.upper() if event_type else None)
+ return jsonify(ok=True,count=len(rows),events=rows)
 
 @app.get("/api/admin/ai/events/routing")
 def ai_event_routing():
