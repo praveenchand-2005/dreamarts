@@ -1198,6 +1198,51 @@ def finance_intelligence():
   if pct<15:insights.append({"type":"LOW_MARGIN_PRODUCT","product":p.get("name"),"margin_percent":round(pct,2),"recommendation":"Review pricing or production cost"})
  return jsonify(ok=True,insights=insights,generated_at=datetime.datetime.utcnow().isoformat()+"Z")
 
+@app.get("/api/admin/operations/overview")
+def operations_overview():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("orders?select=order_number,status,created_at,updated_at",token=token);rows=rows if isinstance(rows,list) else []
+ stages=["NEW REQUEST","PHOTO REVIEW","QUOTE SENT","AWAITING APPROVAL","PAYMENT PENDING","PAID","IN PRODUCTION","QUALITY CHECK","SHIPPED","DELIVERED","CANCELLED"]
+ counts={s:0 for s in stages}
+ for o in rows:
+  s=str(o.get("status","")).upper()
+  if s in counts:counts[s]+=1
+ active=sum(v for k,v in counts.items() if k not in ["DELIVERED","CANCELLED"])
+ bottlenecks=sorted([{"stage":k,"orders":v} for k,v in counts.items() if k not in ["DELIVERED","CANCELLED"]],key=lambda x:x["orders"],reverse=True)
+ return jsonify(ok=True,total_orders=len(rows),active_workload=active,by_stage=counts,bottlenecks=bottlenecks[:3])
+
+@app.get("/api/admin/operations/alerts")
+def operations_alerts():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("orders?select=order_number,status,created_at,updated_at",token=token);rows=rows if isinstance(rows,list) else []
+ now=datetime.datetime.utcnow();alerts=[]
+ for o in rows:
+  s=str(o.get("status","")).upper()
+  if s in ["DELIVERED","CANCELLED"]:continue
+  ts=o.get("updated_at") or o.get("created_at")
+  try:
+   age=(now-datetime.datetime.fromisoformat(str(ts).replace("Z","+00:00")).replace(tzinfo=None)).days
+   if age>=3:alerts.append({"type":"STALLED_ORDER","severity":"HIGH" if age>=7 else "MEDIUM","order_number":o.get("order_number"),"status":s,"days_without_update":age})
+  except:pass
+ return jsonify(ok=True,count=len(alerts),alerts=alerts)
+
+@app.get("/api/admin/operations/intelligence")
+def operations_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("orders?select=status",token=token);rows=rows if isinstance(rows,list) else []
+ counts={}
+ for o in rows:
+  s=str(o.get("status","")).upper()
+  if s not in ["DELIVERED","CANCELLED"]:counts[s]=counts.get(s,0)+1
+ top=sorted(counts.items(),key=lambda x:x[1],reverse=True)
+ insights=[]
+ if top and top[0][1]>=3:insights.append({"type":"BOTTLENECK","severity":"HIGH" if top[0][1]>=10 else "MEDIUM","stage":top[0][0],"orders":top[0][1],"recommendation":"Investigate capacity and workflow at this stage"})
+ return jsonify(ok=True,insights=insights)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
