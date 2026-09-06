@@ -130,6 +130,28 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/orders/<order_number>/qc")
+def get_qc(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(supabase_request("order_qc?order_number=eq."+order_number+"&select=*&limit=1",token=auth.split(" ",1)[1]))
+
+@app.put("/api/admin/orders/<order_number>/qc")
+def save_qc(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ fields={"order_number":order_number,"nail_alignment":bool(b.get("nail_alignment")),"string_tension":bool(b.get("string_tension")),"design_match":bool(b.get("design_match")),"frame_condition":bool(b.get("frame_condition")),"final_photo_url":b.get("final_photo_url"),"notes":b.get("notes"),"qc_status":b.get("qc_status","PENDING")}
+ existing=supabase_request("order_qc?order_number=eq."+order_number+"&select=id",token=token)
+ if isinstance(existing,list) and existing:
+  r=supabase_request("order_qc?order_number=eq."+order_number,method="PATCH",body=fields,token=token,prefer="return=representation")
+ else:r=supabase_request("order_qc",method="POST",body=fields,token=token,prefer="return=representation")
+ if isinstance(r,dict) and "_error" in r:return jsonify(error="Could not save QC.",details=r["_error"]),400
+ if fields["qc_status"]=="APPROVED":
+  supabase_request("orders?order_number=eq."+order_number,method="PATCH",body={"status":"SHIPPED"},token=token)
+  create_order_notification(token,order_number,"Quality inspection passed","Your artwork passed final quality inspection and is ready for shipping.","quality")
+ return jsonify(ok=True)
+
 @app.get("/api/admin/orders/<order_number>/specification")
 def order_specification(order_number):
  auth=request.headers.get("Authorization","")
