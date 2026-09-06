@@ -816,6 +816,40 @@ def autonomy_execute(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTION_AUTHORIZED","execution_authorization":json.dumps({"authorized_by":"AUTONOMY_POLICY","level":level,"action_type":action_type,"authorized_at":now})},token=token)
  return execute_real_registered_action(task_id)
 
+def autonomy_level_for_trust(trust,current="L2"):
+ if trust is None:return current
+ if trust>=85:return "L4"
+ if trust>=75:return "L3"
+ if trust<45:return "L1"
+ if trust<60:return "L2"
+ return current
+
+@app.post("/api/admin/agent-autonomy/review")
+def review_agent_autonomy():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("agent_tasks?select=id,agent,autonomy_level,outcome_learning&limit=5000",token=token);rows=rows if isinstance(rows,list) else []
+ grouped={}
+ for row in rows:
+  ag=row.get("agent")
+  if not ag:continue
+  g=grouped.setdefault(ag,{"scores":[],"level":row.get("autonomy_level") or "L2","ids":[]})
+  g["ids"].append(row.get("id"));raw=row.get("outcome_learning")
+  if raw:
+   try:e=json.loads(raw) if isinstance(raw,str) else raw;g["scores"].append(e.get("outcome_score",50))
+   except:pass
+ changes=[];now=datetime.datetime.utcnow().isoformat()+"Z"
+ for ag,g in grouped.items():
+  recent=g["scores"][-10:]
+  if not recent:continue
+  trust=round(sum(recent)/len(recent),1);new=autonomy_level_for_trust(trust,g["level"])
+  if new!=g["level"]:
+   for tid in g["ids"]:
+    supabase_request("agent_tasks?id=eq."+tid,method="PATCH",body={"autonomy_level":new,"autonomy_review":json.dumps({"previous":g["level"],"new":new,"outcome_trust":trust,"reviewed_at":now})},token=token)
+   changes.append({"agent":ag,"previous_level":g["level"],"new_level":new,"outcome_trust":trust,"reason":"Outcome-driven autonomy policy"})
+ return jsonify(ok=True,reviewed=len(grouped),changes=changes,reviewed_at=now)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
