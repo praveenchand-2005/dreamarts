@@ -160,8 +160,8 @@ def run_agents_now():
  auth=request.headers.get("Authorization","")
  agent_key=os.environ.get("DREAMARTS_AGENT_KEY","")
  if agent_key and auth=="Bearer "+agent_key:
-  token=os.environ.get("SUPABASE_SERVICE_ROLE_KEY","")
-  if not token:return jsonify(error="Agent service role is not configured."),503
+  token=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
+  if not token:return jsonify(error="Supabase API key is not configured."),503
  elif auth.startswith("Bearer "):
   token=auth.split(" ",1)[1]
  else:return jsonify(error="Unauthorized"),401
