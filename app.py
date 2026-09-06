@@ -230,6 +230,20 @@ def business_intelligence():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,intelligence=autonomous_investigation(auth.split(" ",1)[1]))
 
+def founder_briefing(token):
+ tasks=supabase_request("agent_tasks?select=agent,title,priority,status,proposed_action,created_at&order=created_at.desc&limit=200",token=token);tasks=tasks if isinstance(tasks,list) else []
+ pending=[t for t in tasks if t.get("status")=="PENDING"];critical=[t for t in pending if t.get("priority") in ("CRITICAL","HIGH")]
+ anomalies=kpi_anomalies(token).get("alerts",[])
+ actions=[]
+ for t in critical[:5]:actions.append({"priority":t.get("priority"),"owner":t.get("agent"),"issue":t.get("title"),"action":t.get("proposed_action")})
+ return {"generated_at":datetime.datetime.utcnow().isoformat()+"Z","headline":f"{len(critical)} high-priority items require attention.","metrics":{"pending_tasks":len(pending),"high_priority":len(critical),"kpi_alerts":len(anomalies)},"top_actions":actions,"kpi_alerts":anomalies,"message":"Focus on the highest-impact unresolved signals first; approve only actions aligned with current business priorities."}
+
+@app.get("/api/admin/founder-briefing")
+def founder_briefing_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,briefing=founder_briefing(auth.split(" ",1)[1]))
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
