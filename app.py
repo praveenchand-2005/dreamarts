@@ -666,6 +666,35 @@ def recalculate_outcome_trust():
   supabase_request("agent_tasks?agent=eq."+x["agent"],method="PATCH",body={"outcome_trust_snapshot":json.dumps({"score":x["outcome_trust_score"],"level":x["level"],"calculated_at":now})},token=token)
  return jsonify(ok=True,recalculated=len(agents),agents=agents,calculated_at=now)
 
+@app.post("/api/admin/agent-tasks/<task_id>/authorize-execution")
+def authorize_agent_execution(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ if task.get("status") not in ("APPROVED","RECOMMENDED","EXECUTION_AUTHORIZED"):return jsonify(error="Task is not eligible for execution authorization"),400
+ now=datetime.datetime.utcnow().isoformat()+"Z";execution={"authorized_at":now,"authorized":True,"status":"EXECUTION_AUTHORIZED","agent":task.get("agent"),"action":None}
+ raw=task.get("recommendation")
+ try:rec=json.loads(raw) if isinstance(raw,str) else (raw or {})
+ except:rec={}
+ execution["action"]=rec.get("action")
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTION_AUTHORIZED","execution_authorization":json.dumps(execution),"updated_at":now},token=token)
+ return jsonify(ok=True,execution=execution)
+
+@app.post("/api/admin/agent-tasks/<task_id>/execute")
+def execute_authorized_task(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ if task.get("status")!="EXECUTION_AUTHORIZED":return jsonify(error="Founder authorization required before execution"),403
+ raw=task.get("execution_authorization")
+ try:authz=json.loads(raw) if isinstance(raw,str) else raw
+ except:authz={}
+ now=datetime.datetime.utcnow().isoformat()+"Z";log={"executed_at":now,"agent":task.get("agent"),"action":authz.get("action"),"result":"EXECUTION_RECORDED","mode":"CONTROLLED"}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(log),"updated_at":now},token=token)
+ return jsonify(ok=True,execution=log)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
