@@ -394,6 +394,19 @@ def decision_audit_api():
  audit=decision_audit(auth.split(" ",1)[1])
  return jsonify(ok=True,count=len(audit),audit=audit)
 
+@app.get("/api/admin/decision-analytics")
+def decision_analytics_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ audit=decision_audit(auth.split(" ",1)[1]);total=len(audit)
+ approved=sum(1 for x in audit if x.get("decision")=="APPROVED");rejected=sum(1 for x in audit if x.get("decision")=="REJECTED");delegated=sum(1 for x in audit if x.get("decision")=="DELEGATED")
+ agents={}
+ for x in audit:
+  n=x.get("agent","Unknown Agent");m=agents.setdefault(n,{"total":0,"approved":0,"rejected":0,"delegated":0});m["total"]+=1
+  d=x.get("decision","").lower();m[d]=m.get(d,0)+1
+ for m in agents.values():m["approval_rate"]=round(m["approved"]/m["total"]*100,1) if m["total"] else 0
+ return jsonify(ok=True,summary={"total_decisions":total,"approved":approved,"rejected":rejected,"delegated":delegated,"approval_rate":round(approved/total*100,1) if total else 0},agents=agents)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
