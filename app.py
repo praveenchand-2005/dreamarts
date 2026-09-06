@@ -695,6 +695,32 @@ def execute_authorized_task(task_id):
  supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(log),"updated_at":now},token=token)
  return jsonify(ok=True,execution=log)
 
+EXECUTION_ACTION_REGISTRY={
+ "Operations Agent":{"ORDER_ESCALATION":{"description":"Create controlled operational escalation","risk":"MEDIUM"},"ORDER_REVIEW":{"description":"Flag order for operational review","risk":"LOW"}},
+ "Sales Intelligence Agent":{"LEAD_FOLLOW_UP":{"description":"Create controlled sales follow-up","risk":"LOW"},"SALES_REVIEW":{"description":"Flag sales opportunity for review","risk":"LOW"}},
+ "Finance Intelligence Agent":{"PAYMENT_REVIEW":{"description":"Create controlled payment investigation","risk":"MEDIUM"},"FINANCE_REVIEW":{"description":"Create finance review task","risk":"MEDIUM"}}
+}
+
+@app.get("/api/admin/execution-actions")
+def execution_actions():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,registry=EXECUTION_ACTION_REGISTRY)
+
+@app.post("/api/admin/agent-tasks/<task_id>/execute-action")
+def execute_registered_action(task_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};action_type=body.get("action_type")
+ rows=supabase_request("agent_tasks?id=eq."+task_id+"&select=*",token=token);task=rows[0] if isinstance(rows,list) and rows else None
+ if not task:return jsonify(error="Task not found"),404
+ if task.get("status")!="EXECUTION_AUTHORIZED":return jsonify(error="Founder authorization required"),403
+ agent=task.get("agent");spec=EXECUTION_ACTION_REGISTRY.get(agent,{}).get(action_type)
+ if not spec:return jsonify(error="Action is not registered for this agent"),403
+ now=datetime.datetime.utcnow().isoformat()+"Z";record={"action_type":action_type,"description":spec["description"],"risk":spec["risk"],"executed_at":now,"result":"CONTROLLED_ACTION_RECORDED"}
+ supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"EXECUTED","execution_log":json.dumps(record),"updated_at":now},token=token)
+ return jsonify(ok=True,action=record)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
