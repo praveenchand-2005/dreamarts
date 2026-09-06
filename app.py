@@ -1559,6 +1559,21 @@ def ai_event_signals():
  if active>=10:events.append({"event_type":"OPERATIONS_BOTTLENECK","data":{"active_orders":active}})
  return jsonify(ok=True,count=len(events),events=events)
 
+
+# Persistent AI repository helpers. Database is primary when migration exists; memory fallback preserves service availability.
+def ai_repo_get(table,token,query=""):
+ r=supabase_request(table+"?"+query,token=token)
+ return r if isinstance(r,list) else None
+def ai_repo_insert(table,row,token):
+ r=supabase_request(table,method="POST",body=row,token=token,prefer="return=representation")
+ return r if not (isinstance(r,dict) and "_error" in r) else None
+def ai_repo_update(table,row_id,row,token):
+ r=supabase_request(table+"?id=eq."+str(row_id),method="PATCH",body=row,token=token,prefer="return=representation")
+ return r if not (isinstance(r,dict) and "_error" in r) else None
+def ai_repo_mode(token):
+ return "postgres" if all(ai_persist_status(token).values()) else "memory_fallback"
+
+
 AI_RECOMMENDATIONS=[]
 
 @app.post("/api/admin/ai/recommendations")
