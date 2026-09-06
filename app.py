@@ -1119,6 +1119,49 @@ def order_operations_summary():
  active=sum(v for k,v in counts.items() if k not in ["DELIVERED","CANCELLED"])
  return jsonify(ok=True,total=len(rows),active=active,by_status=counts)
 
+@app.get("/api/admin/customers")
+def admin_customers():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];limit=min(max(int(request.args.get("limit",100)),1),500)
+ profiles=supabase_request("profiles?select=id,email,full_name,phone,created_at&limit="+str(limit),token=token);profiles=profiles if isinstance(profiles,list) else []
+ orders=supabase_request("orders?select=customer_id,order_number,status,total_amount,created_at",token=token);orders=orders if isinstance(orders,list) else []
+ by={}
+ for o in orders:
+  cid=o.get("customer_id")
+  if cid:by.setdefault(cid,[]).append(o)
+ out=[]
+ for p in profiles:
+  os=by.get(p.get("id"),[]);spent=sum(float(o.get("total_amount") or 0) for o in os);delivered=sum(1 for o in os if str(o.get("status","")).upper()=="DELIVERED")
+  out.append({**p,"order_count":len(os),"delivered_orders":delivered,"lifetime_value":round(spent,2),"customer_segment":"VIP" if spent>=50000 else "RETURNING" if len(os)>=2 else "NEW" if os else "LEAD"})
+ out.sort(key=lambda x:x["lifetime_value"],reverse=True)
+ return jsonify(ok=True,count=len(out),customers=out)
+
+@app.get("/api/admin/customers/<customer_id>")
+def admin_customer_detail(customer_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ p=supabase_request("profiles?id=eq."+customer_id+"&select=*",token=token);o=supabase_request("orders?customer_id=eq."+customer_id+"&select=*&order=created_at.desc",token=token)
+ if not isinstance(p,list) or not p:return jsonify(error="Customer not found"),404
+ o=o if isinstance(o,list) else [];spent=sum(float(x.get("total_amount") or 0) for x in o)
+ return jsonify(ok=True,customer=p[0],orders=o,insights={"order_count":len(o),"lifetime_value":round(spent,2),"segment":"VIP" if spent>=50000 else "RETURNING" if len(o)>=2 else "NEW"})
+
+@app.get("/api/admin/customers/intelligence")
+def customer_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];profiles=supabase_request("profiles?select=id,email,full_name&limit=1000",token=token);orders=supabase_request("orders?select=customer_id,total_amount,created_at,status",token=token)
+ profiles=profiles if isinstance(profiles,list) else [];orders=orders if isinstance(orders,list) else [];by={}
+ for o in orders:
+  if o.get("customer_id"):by.setdefault(o["customer_id"],[]).append(o)
+ result=[]
+ for p in profiles:
+  os=by.get(p["id"],[]);spent=sum(float(x.get("total_amount") or 0) for x in os)
+  status="HIGH_VALUE" if spent>=50000 else "AT_RISK" if os and all(str(x.get("status","")).upper()=="CANCELLED" for x in os) else "HEALTHY"
+  result.append({"customer_id":p["id"],"name":p.get("full_name"),"order_count":len(os),"lifetime_value":round(spent,2),"health":status})
+ return jsonify(ok=True,customers=result)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
