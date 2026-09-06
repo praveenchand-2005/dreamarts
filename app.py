@@ -1162,6 +1162,42 @@ def customer_intelligence():
   result.append({"customer_id":p["id"],"name":p.get("full_name"),"order_count":len(os),"lifetime_value":round(spent,2),"health":status})
  return jsonify(ok=True,customers=result)
 
+@app.get("/api/admin/finance/overview")
+def finance_overview():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=total_amount,status,created_at",token=token);orders=orders if isinstance(orders,list) else []
+ products=supabase_request("products?select=selling_price,cost_price",token=token);products=products if isinstance(products,list) else []
+ revenue=sum(float(o.get("total_amount") or 0) for o in orders if str(o.get("status","")).upper() not in ["CANCELLED","PAYMENT PENDING"])
+ completed=sum(1 for o in orders if str(o.get("status","")).upper()=="DELIVERED")
+ avg_order=round(revenue/len(orders),2) if orders else 0
+ margins=[(float(p.get("selling_price") or 0)-float(p.get("cost_price") or 0)) for p in products]
+ avg_product_margin=round(sum(margins)/len(margins),2) if margins else 0
+ return jsonify(ok=True,revenue=round(revenue,2),order_count=len(orders),completed_orders=completed,average_order_value=avg_order,product_count=len(products),average_unit_margin=avg_product_margin,estimated_product_gross_margin=round(sum(margins),2))
+
+@app.get("/api/admin/finance/risks")
+def finance_risks():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];orders=supabase_request("orders?select=status,total_amount",token=token);orders=orders if isinstance(orders,list) else []
+ total=len(orders);cancelled=sum(1 for o in orders if str(o.get("status","")).upper()=="CANCELLED");pending=sum(float(o.get("total_amount") or 0) for o in orders if str(o.get("status","")).upper()=="PAYMENT PENDING")
+ risks=[]
+ if total and cancelled/total>.1:risks.append({"type":"CANCELLATION_RATE","severity":"HIGH","message":"Cancellation rate exceeds 10%","rate":round(cancelled/total*100,2)})
+ if pending>0:risks.append({"type":"OUTSTANDING_PAYMENT","severity":"MEDIUM","message":"Orders are awaiting payment","amount":round(pending,2)})
+ return jsonify(ok=True,risks=risks,cancelled_orders=cancelled,outstanding_payment_value=round(pending,2))
+
+@app.get("/api/admin/finance/intelligence")
+def finance_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];products=supabase_request("products?select=name,selling_price,cost_price",token=token);products=products if isinstance(products,list) else []
+ insights=[]
+ for p in products:
+  s=float(p.get("selling_price") or 0);c=float(p.get("cost_price") or 0);pct=((s-c)/s*100) if s else 0
+  if pct<15:insights.append({"type":"LOW_MARGIN_PRODUCT","product":p.get("name"),"margin_percent":round(pct,2),"recommendation":"Review pricing or production cost"})
+ return jsonify(ok=True,insights=insights,generated_at=datetime.datetime.utcnow().isoformat()+"Z")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
