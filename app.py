@@ -204,6 +204,32 @@ def agent_orchestration():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,orchestration=orchestrate_agents(auth.split(" ",1)[1]))
 
+def kpi_anomalies(token):
+ orders=supabase_request("orders?select=status,created_at,total_amount&limit=1000",token=token);orders=orders if isinstance(orders,list) else []
+ now=datetime.datetime.utcnow();recent=0;previous=0;stuck=0
+ for o in orders:
+  try: age=(now-datetime.datetime.fromisoformat(str(o.get("created_at","")).replace("Z","+00:00")).replace(tzinfo=None)).days
+  except: continue
+  if age<7:recent+=1
+  elif age<14:previous+=1
+  if str(o.get("status","")).upper() not in ("DELIVERED","CANCELLED") and age>=5:stuck+=1
+ alerts=[]
+ if previous>0 and recent<previous*0.6:alerts.append({"kpi":"Order volume","severity":"HIGH","change_pct":round((recent/previous-1)*100),"finding":"Recent order volume materially below previous period."})
+ if stuck>=3:alerts.append({"kpi":"Fulfillment backlog","severity":"HIGH","value":stuck,"finding":"Multiple orders are aging beyond operational threshold."})
+ return {"recent_orders":recent,"previous_period_orders":previous,"stuck_orders":stuck,"alerts":alerts}
+
+def autonomous_investigation(token):
+ anomalies=kpi_anomalies(token);chains=[]
+ for alert in anomalies["alerts"]:
+  chains.append({"trigger":alert["kpi"],"severity":alert["severity"],"steps":[{"agent":"Operations Agent","action":"Validate source data and isolate affected workflow."},{"agent":"Production Agent","action":"Check capacity, queue, and fulfillment constraints."},{"agent":"Founder Agent","action":"Review root-cause summary and approve corrective action."}]})
+ return {"anomalies":anomalies,"investigation_chains":chains,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+
+@app.get("/api/admin/business-intelligence")
+def business_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,intelligence=autonomous_investigation(auth.split(" ",1)[1]))
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
