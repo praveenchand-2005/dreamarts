@@ -179,6 +179,31 @@ def agent_intelligence():
  summary={"total_signals":len(intelligence),"critical":sum(1 for x in intelligence if x["risk_score"]>=90),"high_risk":sum(1 for x in intelligence if x["risk_score"]>=70)}
  return jsonify(ok=True,summary=summary,recommendations=intelligence)
 
+def agent_memory_summary(token):
+ rows=supabase_request("agent_tasks?select=agent,status,priority,created_at&order=created_at.desc&limit=500",token=token)
+ rows=rows if isinstance(rows,list) else []
+ memory={}
+ for row in rows:
+  agent=row.get("agent","Unknown Agent");m=memory.setdefault(agent,{"total":0,"pending":0,"executed":0,"high_priority":0})
+  m["total"]+=1
+  if row.get("status")=="PENDING":m["pending"]+=1
+  if row.get("status")=="EXECUTED":m["executed"]+=1
+  if row.get("priority") in ("HIGH","CRITICAL"):m["high_priority"]+=1
+ return memory
+
+def orchestrate_agents(token):
+ memory=agent_memory_summary(token);handoffs=[]
+ for agent,m in memory.items():
+  if m["pending"]>=3:
+   handoffs.append({"from":agent,"to":"Founder Agent","reason":f"{m['pending']} unresolved tasks require prioritization.","priority":"HIGH"})
+ return {"memory":memory,"handoffs":handoffs,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+
+@app.get("/api/admin/agent-orchestration")
+def agent_orchestration():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,orchestration=orchestrate_agents(auth.split(" ",1)[1]))
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
