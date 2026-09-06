@@ -303,12 +303,15 @@ def executive_decision_queue(token):
  ranked=autonomous_priorities(token)
  outcomes=outcome_tracking(token)
  agent_perf=outcomes.get("agents",{})
+ quality=recommendation_quality(token)
  decisions=[]
  for x in ranked:
   perf=agent_perf.get(x.get("agent"),{})
-  confidence=min(0.95,0.55+(perf.get("execution_rate",0)/200))
-  score=round(x.get("impact_score",0)*0.7+confidence*30)
-  decisions.append({**x,"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
+  trust=quality.get(x.get("agent"),{}).get("quality_score",50)/100
+  execution=perf.get("execution_rate",0)/100
+  confidence=min(0.97,0.35+execution*0.25+trust*0.4)
+  score=round(x.get("impact_score",0)*0.65+confidence*35)
+  decisions.append({**x,"trust_score":round(trust*100,1),"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
  return sorted(decisions,key=lambda x:x["decision_score"],reverse=True)
 
 @app.get("/api/admin/executive-decisions")
