@@ -342,7 +342,10 @@ def studio_checkout():
  if not isinstance(session,list) or not session:return jsonify(error="Saved artwork session not found."),404
  s=session[0];c=s.get("config") or {};vs=s.get("variants") or [];idx=int(s.get("selected_variant") or 0);chosen=vs[idx] if idx<len(vs) else {}
  oid="DA-"+time.strftime("%Y%m%d")+"-"+uuid.uuid4().hex[:6].upper()
- order={"order_number":oid,"user_id":uid,"status":"AWAITING_APPROVAL","artwork_shape":c.get("shape","Custom"),"artwork_width_mm":c.get("width_mm"),"artwork_height_mm":c.get("height_mm"),"anchor_nails":c.get("anchor_nails") or c.get("nails"),"string_lines":c.get("string_lines") or c.get("lines"),"notes":json.dumps({"studio_session_id":sid,"selected_engine":chosen.get("engine") or c.get("selected_engine"),"selected_variant":chosen.get("name") or c.get("selected_variant"),"artwork_focus":c.get("artwork_focus") or c.get("focus"),"thread_tone":c.get("thread_tone") or c.get("tone")})}
+ profiles=supabase_request("profiles?id=eq."+uid+"&select=full_name,phone,address_line1,address_line2,city,state,postal_code,country",token=token)
+ p=profiles[0] if isinstance(profiles,list) and profiles else {}
+ shipping={"full_name":p.get("full_name"),"phone":p.get("phone"),"address_line1":p.get("address_line1"),"address_line2":p.get("address_line2"),"city":p.get("city"),"state":p.get("state"),"postal_code":p.get("postal_code"),"country":p.get("country")}
+ order={"order_number":oid,"user_id":uid,"status":"AWAITING_APPROVAL","artwork_shape":c.get("shape","Custom"),"artwork_width_mm":c.get("width_mm"),"artwork_height_mm":c.get("height_mm"),"anchor_nails":c.get("anchor_nails") or c.get("nails"),"string_lines":c.get("string_lines") or c.get("lines"),"shipping_address":shipping,"notes":json.dumps({"studio_session_id":sid,"selected_engine":chosen.get("engine") or c.get("selected_engine"),"selected_variant":chosen.get("name") or c.get("selected_variant"),"artwork_focus":c.get("artwork_focus") or c.get("focus"),"thread_tone":c.get("thread_tone") or c.get("tone")})}
  result=supabase_request("orders",method="POST",body=order,token=token,prefer="return=representation")
  if isinstance(result,dict) and "_error" in result:return jsonify(error="Could not create production order.",details=result["_error"]),400
  return jsonify(ok=True,orderNumber=oid,status="AWAITING_APPROVAL")
