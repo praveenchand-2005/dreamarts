@@ -378,6 +378,22 @@ def delegate_agent_task(task_id):
  r=supabase_request("agent_tasks?id=eq."+task_id,method="PATCH",body={"status":"DELEGATED","delegated_to":owner,"updated_at":datetime.datetime.utcnow().isoformat()+"Z"},token=token)
  return jsonify(ok=True,task_id=task_id,status="DELEGATED",delegated_to=owner)
 
+def decision_audit(token):
+ rows=supabase_request("agent_tasks?select=id,agent,title,priority,status,order_number,created_at,updated_at,approved_at,delegated_to,rejection_reason&order=updated_at.desc&limit=500",token=token)
+ rows=rows if isinstance(rows,list) else []
+ audit=[]
+ for x in rows:
+  if x.get("status") in ("EXECUTED","REJECTED","DELEGATED"):
+   audit.append({"task_id":x.get("id"),"agent":x.get("agent"),"decision":"APPROVED" if x.get("status")=="EXECUTED" else x.get("status"),"title":x.get("title"),"priority":x.get("priority"),"timestamp":x.get("updated_at") or x.get("approved_at") or x.get("created_at"),"delegate":x.get("delegated_to"),"reason":x.get("rejection_reason")})
+ return audit
+
+@app.get("/api/admin/decision-audit")
+def decision_audit_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ audit=decision_audit(auth.split(" ",1)[1])
+ return jsonify(ok=True,count=len(audit),audit=audit)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
