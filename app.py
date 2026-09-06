@@ -2,7 +2,7 @@ from flask import Flask,request,jsonify,send_from_directory
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
-import os,json,uuid,time,hmac,hashlib,base64,html
+import os,json,uuid,time,hmac,hashlib,base64,html,urllib.parse
 from dreamarts_engine import generate as generate_string_art, benchmark as benchmark_string_art
 
 BASE=os.path.dirname(__file__)
@@ -88,6 +88,15 @@ def my_notifications():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  token=auth.split(" ",1)[1]
  return jsonify(supabase_request("notifications?select=*&order=created_at.desc&limit=30",token=token))
+
+def send_whatsapp_notification(phone,message):
+ token=os.environ.get("WHATSAPP_ACCESS_TOKEN","");phone_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID","")
+ if not token or not phone_id or not phone:return False
+ payload={"messaging_product":"whatsapp","to":phone,"type":"text","text":{"body":message}}
+ try:
+  req=Request("https://graph.facebook.com/v22.0/"+phone_id+"/messages",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"},method="POST")
+  with urlopen(req,timeout=15) as r:return 200<=r.status<300
+ except Exception:return False
 
 def send_transactional_email(to_email,subject,message):
  api_key=os.environ.get("RESEND_API_KEY","");sender=os.environ.get("RESEND_FROM_EMAIL","")
