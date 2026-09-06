@@ -407,6 +407,29 @@ def decision_analytics_api():
  for m in agents.values():m["approval_rate"]=round(m["approved"]/m["total"]*100,1) if m["total"] else 0
  return jsonify(ok=True,summary={"total_decisions":total,"approved":approved,"rejected":rejected,"delegated":delegated,"approval_rate":round(approved/total*100,1) if total else 0},agents=agents)
 
+def recommendation_quality(token):
+ audit=decision_audit(token);groups={}
+ for x in audit:
+  key=x.get("agent","Unknown Agent");m=groups.setdefault(key,{"total":0,"approved":0,"rejected":0,"delegated":0,"high":0,"high_approved":0})
+  m["total"]+=1
+  if x.get("decision")=="APPROVED":m["approved"]+=1
+  if x.get("decision")=="REJECTED":m["rejected"]+=1
+  if x.get("decision")=="DELEGATED":m["delegated"]+=1
+  if x.get("priority") in ("HIGH","CRITICAL"):
+   m["high"]+=1
+   if x.get("decision")=="APPROVED":m["high_approved"]+=1
+ for m in groups.values():
+  m["quality_score"]=round((m["approved"]/m["total"]*100) if m["total"] else 0,1)
+  m["high_priority_quality"]=round((m["high_approved"]/m["high"]*100) if m["high"] else 0,1)
+ return groups
+
+@app.get("/api/admin/recommendation-quality")
+def recommendation_quality_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ q=recommendation_quality(auth.split(" ",1)[1])
+ return jsonify(ok=True,quality=q)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
