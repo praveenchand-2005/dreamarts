@@ -1,0 +1,6 @@
+-- Dreamarts AI persistence migration
+create table if not exists ai_recommendations (id text primary key,title text not null,recommendation text not null,source_event text,risk text,confidence numeric,status text not null,decision jsonb,created_at timestamptz default now());
+create table if not exists ai_executions (id text primary key,recommendation_id text,action text,status text,payload jsonb,outcome jsonb,learning_id text,created_at timestamptz default now());
+create table if not exists ai_learning_memory (id text primary key,execution_id text,recommendation_id text,action text,lesson text,outcome jsonb,created_at timestamptz default now());
+create table if not exists ai_event_history (id text primary key,event_type text,data jsonb,priority text,agent text,created_at timestamptz default now());
+alter table ai_recommendations enable row level security; alter table ai_executions enable row level security; alter table ai_learning_memory enable row level security; alter table ai_event_history enable row level security;
