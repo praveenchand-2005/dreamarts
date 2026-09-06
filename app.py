@@ -894,6 +894,39 @@ def orchestrate_agent_council():
  recommendation={"topic":topic,"category":category,"participants":agents,"evidence":evidence,"investigations":investigations,"challenge_round":challenge_round,"consensus_confidence":consensus_confidence,"consensus_level":"HIGH" if consensus_confidence>=80 else "MEDIUM" if consensus_confidence>=60 else "LOW","recommendation":"Use a measurable, reversible plan with explicit financial and operational guardrails.","created_at":datetime.datetime.utcnow().isoformat()+"Z"}
  return jsonify(ok=True,council=recommendation)
 
+@app.get("/api/admin/council-memory")
+def council_memory():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];q=request.args.get("q","").lower()
+ rows=supabase_request("agent_tasks?agent=eq.Executive%20Council&select=id,title,description,status,council_deliberation,outcome_measurement,updated_at&limit=500",token=token);rows=rows if isinstance(rows,list) else []
+ memories=[]
+ for r in rows:
+  if q and q not in ((r.get("title") or "")+" "+(r.get("description") or "")).lower():continue
+  d=r.get("council_deliberation")
+  try:d=json.loads(d) if isinstance(d,str) else d
+  except:d={}
+  o=r.get("outcome_measurement")
+  try:o=json.loads(o) if isinstance(o,str) else o
+  except:o={}
+  memories.append({"task_id":r.get("id"),"topic":r.get("title"),"recommendation":r.get("description"),"status":r.get("status"),"participants":d.get("participants",[]),"disagreements":d.get("disagreements") or d.get("challenge_round",[]),"consensus_confidence":d.get("consensus_confidence"),"outcome":o.get("assessment"),"updated_at":r.get("updated_at")})
+ return jsonify(ok=True,count=len(memories),memories=memories)
+
+@app.post("/api/admin/council-memory/recall")
+def recall_council_memory():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];body=request.get_json(silent=True) or {};topic=(body.get("topic") or "").lower()
+ rows=supabase_request("agent_tasks?agent=eq.Executive%20Council&select=id,title,description,status,council_deliberation,outcome_measurement,updated_at&limit=500",token=token);rows=rows if isinstance(rows,list) else []
+ ranked=[]
+ for r in rows:
+  text=((r.get("title") or "")+" "+(r.get("description") or "")).lower();terms=[x for x in topic.split() if len(x)>2];score=sum(1 for x in terms if x in text)
+  if score:
+   ranked.append((score,r))
+ ranked.sort(key=lambda x:x[0],reverse=True)
+ matches=[{"task_id":r.get("id"),"topic":r.get("title"),"recommendation":r.get("description"),"status":r.get("status"),"similarity_score":s,"updated_at":r.get("updated_at")} for s,r in ranked[:10]]
+ return jsonify(ok=True,query=body.get("topic"),matches=matches)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
