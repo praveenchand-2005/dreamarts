@@ -2,7 +2,7 @@ from flask import Flask,request,jsonify,send_from_directory
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from werkzeug.utils import secure_filename
-import os,json,uuid,time,hmac,hashlib,base64,html,urllib.parse
+import os,json,uuid,time,hmac,hashlib,base64,html,urllib.parse,datetime
 from dreamarts_engine import generate as generate_string_art, benchmark as benchmark_string_art
 
 BASE=os.path.dirname(__file__)
@@ -142,7 +142,7 @@ def generate_agent_tasks(token):
   if str(o.get("status","")).upper() not in ("DELIVERED","CANCELLED"):
    try:age=(now-datetime.datetime.fromisoformat(str(o["created_at"]).replace("Z","+00:00")).replace(tzinfo=None)).days
    except Exception:age=0
-   if age>=5:candidates.append(("Production Agent",o["order_number"],"Potential delivery risk","HIGH",f"Review production status; order open for {age} days."))
+   if age>=3:candidates.append(("Production Agent",o["order_number"],"Order aging risk","HIGH" if age>=7 else "MEDIUM",f"Investigate order status; order open for {age} days."))\n   if str(o.get("status","")).upper() in ("PAID","IN PRODUCTION") and age>=2:candidates.append(("Operations Agent",o["order_number"],"Workflow bottleneck check","MEDIUM","Check assignment, production capacity, and next operational action."))
  for q in qc:
   if q.get("qc_status")=="PENDING":candidates.append(("Quality Agent",q["order_number"],"Pending QC inspection","MEDIUM","Assign or complete quality inspection."))
  for r in reviews:
