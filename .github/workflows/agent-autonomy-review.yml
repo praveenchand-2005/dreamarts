@@ -1,0 +1,21 @@
+name: Dreamarts Agent Autonomy Review
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recalculate outcome trust
+        env:
+          DREAMARTS_URL: ${{ secrets.DREAMARTS_URL }}
+          BI_TOKEN: ${{ secrets.BI_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -X POST "${DREAMARTS_URL}/api/admin/agent-outcome-trust/recalculate" -H "Authorization: Bearer ${BI_TOKEN}" -H "Content-Type: application/json"
+      - name: Review agent autonomy
+        env:
+          DREAMARTS_URL: ${{ secrets.DREAMARTS_URL }}
+          BI_TOKEN: ${{ secrets.BI_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -X POST "${DREAMARTS_URL}/api/admin/agent-autonomy/review" -H "Authorization: Bearer ${BI_TOKEN}" -H "Content-Type: application/json"
