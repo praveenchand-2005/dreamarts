@@ -305,12 +305,24 @@ def executive_decision_queue(token):
  agent_perf=outcomes.get("agents",{})
  quality=recommendation_quality(token)
  drift=recommendation_drift(token)
+ # Blend historical recommendation quality with actual business outcome trust.
+ outcome_rows=supabase_request("agent_tasks?select=agent,outcome_learning&limit=5000",token=token);outcome_rows=outcome_rows if isinstance(outcome_rows,list) else []
+ outcome_scores={}
+ for row in outcome_rows:
+  raw=row.get("outcome_learning")
+  if not raw:continue
+  try:event=json.loads(raw) if isinstance(raw,str) else raw
+  except:continue
+  outcome_scores.setdefault(row.get("agent","Unknown Agent"),[]).append(event.get("outcome_score",50))
+ outcome_trust={k:sum(v[-10:])/len(v[-10:])/100 for k,v in outcome_scores.items() if v}
  penalties={x["agent"]:min(0.35,x["quality_drop"]/100) for x in drift.get("alerts",[])}
  decisions=[]
  for x in ranked:
   perf=agent_perf.get(x.get("agent"),{})
   q=quality.get(x.get("agent"),{})
-  base_trust=q.get("quality_score",50)/100
+  quality_trust=q.get("quality_score",50)/100
+  actual_outcome_trust=outcome_trust.get(x.get("agent"))
+  base_trust=(quality_trust*0.6+actual_outcome_trust*0.4) if actual_outcome_trust is not None else quality_trust
   penalty=penalties.get(x.get("agent"),0)
   recovery=0
   # Sustained strong recommendation quality restores part of calibration penalties.
@@ -321,7 +333,7 @@ def executive_decision_queue(token):
   execution=perf.get("execution_rate",0)/100
   confidence=min(0.97,0.35+execution*0.25+trust*0.4)
   score=round(x.get("impact_score",0)*0.65+confidence*35)
-  decisions.append({**x,"base_trust_score":round(base_trust*100,1),"calibration_penalty":round(penalty*100,1),"recovery_credit":round(recovery*100,1),"effective_penalty":round(effective_penalty*100,1),"trust_score":round(trust*100,1),"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
+  decisions.append({**x,"quality_trust_score":round(quality_trust*100,1),"outcome_trust_score":round(actual_outcome_trust*100,1) if actual_outcome_trust is not None else None,"base_trust_score":round(base_trust*100,1),"calibration_penalty":round(penalty*100,1),"recovery_credit":round(recovery*100,1),"effective_penalty":round(effective_penalty*100,1),"trust_score":round(trust*100,1),"decision_score":score,"confidence":round(confidence,2),"decision":"ACT NOW" if score>=80 else "REVIEW NEXT" if score>=60 else "MONITOR"})
  return sorted(decisions,key=lambda x:x["decision_score"],reverse=True)
 
 @app.get("/api/admin/executive-decisions")
