@@ -155,6 +155,29 @@ def generate_agent_tasks(token):
    if isinstance(result,list):created.append(result[0])
  return created
 
+def agent_risk_score(priority,age=0,confidence=0.75):
+ base={"LOW":25,"MEDIUM":50,"HIGH":75,"CRITICAL":95}.get(priority,40)
+ return min(100,round(base*0.65+min(age*4,20)+confidence*15))
+
+def build_agent_recommendation(agent,title,priority,action,age=0):
+ score=agent_risk_score(priority,age)
+ return {"agent":agent,"signal":title,"priority":priority,"risk_score":score,"confidence":0.82 if score>=70 else 0.72,"recommended_action":action,"requires_approval":True}
+
+@app.get("/api/admin/agent-intelligence")
+def agent_intelligence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ rows=supabase_request("agent_tasks?status=eq.PENDING&select=*&order=created_at.desc&limit=100",token=token)
+ rows=rows if isinstance(rows,list) else []
+ intelligence=[]
+ for t in rows:
+  rec=build_agent_recommendation(t.get("agent"),t.get("title"),t.get("priority"),t.get("proposed_action") or "")
+  rec["task_id"]=t.get("id");rec["order_number"]=t.get("order_number");intelligence.append(rec)
+ intelligence.sort(key=lambda x:x["risk_score"],reverse=True)
+ summary={"total_signals":len(intelligence),"critical":sum(1 for x in intelligence if x["risk_score"]>=90),"high_risk":sum(1 for x in intelligence if x["risk_score"]>=70)}
+ return jsonify(ok=True,summary=summary,recommendations=intelligence)
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
