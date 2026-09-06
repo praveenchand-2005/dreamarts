@@ -130,11 +130,37 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+def generate_agent_tasks(token):
+ orders=supabase_request("orders?select=order_number,status,created_at",token=token);orders=orders if isinstance(orders,list) else []
+ qc=supabase_request("order_qc?select=order_number,qc_status",token=token);qc=qc if isinstance(qc,list) else []
+ reviews=supabase_request("order_reviews?select=order_number,rating",token=token);reviews=reviews if isinstance(reviews,list) else []
+ existing=supabase_request("agent_tasks?status=eq.PENDING&select=agent,order_number,title",token=token);existing=existing if isinstance(existing,list) else []
+ keys={(x.get("agent"),x.get("order_number"),x.get("title")) for x in existing}
+ now=datetime.datetime.utcnow();created=[]
+ candidates=[]
+ for o in orders:
+  if str(o.get("status","")).upper() not in ("DELIVERED","CANCELLED"):
+   try:age=(now-datetime.datetime.fromisoformat(str(o["created_at"]).replace("Z","+00:00")).replace(tzinfo=None)).days
+   except Exception:age=0
+   if age>=5:candidates.append(("Production Agent",o["order_number"],"Potential delivery risk","HIGH",f"Review production status; order open for {age} days."))
+ for q in qc:
+  if q.get("qc_status")=="PENDING":candidates.append(("Quality Agent",q["order_number"],"Pending QC inspection","MEDIUM","Assign or complete quality inspection."))
+ for r in reviews:
+  if float(r.get("rating") or 5)<=2:candidates.append(("Customer Success Agent",r.get("order_number"),"Low customer rating","HIGH","Review feedback and prepare service-recovery response."))
+ for agent,order,title,priority,action in candidates:
+  key=(agent,order,title)
+  if key not in keys:
+   row={"agent":agent,"order_number":order,"title":title,"priority":priority,"status":"PENDING","requires_approval":True,"proposed_action":action}
+   result=supabase_request("agent_tasks",method="POST",body=row,token=token,prefer="return=representation")
+   if isinstance(result,list):created.append(result[0])
+ return created
+
 @app.get("/api/admin/agent-tasks")
 def agent_tasks():
  auth=request.headers.get("Authorization","")
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  token=auth.split(" ",1)[1]
+ generate_agent_tasks(token)
  rows=supabase_request("agent_tasks?select=*&order=created_at.desc&limit=100",token=token)
  return jsonify(rows if isinstance(rows,list) else [])
 
