@@ -282,6 +282,23 @@ def outcomes_api():
  if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
  return jsonify(ok=True,outcomes=outcome_tracking(auth.split(" ",1)[1]))
 
+def autonomous_priorities(token):
+ rows=supabase_request("agent_tasks?status=eq.PENDING&select=id,agent,title,priority,order_number,proposed_action,created_at&limit=500",token=token);rows=rows if isinstance(rows,list) else []
+ base={"LOW":20,"MEDIUM":45,"HIGH":70,"CRITICAL":90};now=datetime.datetime.utcnow();ranked=[]
+ for x in rows:
+  try: age=max(0,(now-datetime.datetime.fromisoformat(str(x.get("created_at")).replace("Z","+00:00")).replace(tzinfo=None)).total_seconds()/3600)
+  except: age=0
+  urgency=min(20,age/24*5);score=min(100,round(base.get(x.get("priority"),40)+urgency))
+  ranked.append({"task_id":x.get("id"),"agent":x.get("agent"),"title":x.get("title"),"priority":x.get("priority"),"impact_score":score,"urgency_score":round(urgency,1),"recommended_action":x.get("proposed_action")})
+ return sorted(ranked,key=lambda x:x["impact_score"],reverse=True)
+
+@app.get("/api/admin/autonomous-priorities")
+def autonomous_priorities_api():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ ranked=autonomous_priorities(auth.split(" ",1)[1])
+ return jsonify(ok=True,count=len(ranked),priorities=ranked)
+
 @app.post("/api/admin/agents/run")
 def run_agents_now():
  auth=request.headers.get("Authorization","")
