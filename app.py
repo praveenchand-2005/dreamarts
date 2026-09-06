@@ -967,6 +967,37 @@ def strategy_scenario_simulate():
  for rank,x in enumerate(results,1):x["rank"]=rank
  return jsonify(ok=True,topic=topic,scenarios=results,recommended=results[0],simulation_note="Decision-support model; estimates require real evidence and founder validation.",created_at=datetime.datetime.utcnow().isoformat()+"Z")
 
+EXPERIMENT_DECISIONS={"RUNNING","COMPLETED","PAUSED","STOPPED","SCALE","MODIFY"}
+
+@app.post("/api/admin/strategy/experiments")
+def create_strategy_experiment():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};now=datetime.datetime.utcnow().isoformat()+"Z"
+ required=["name","hypothesis"]
+ missing=[x for x in required if not b.get(x)]
+ if missing:return jsonify(error="Missing required fields",fields=missing),400
+ exp={"name":b["name"],"hypothesis":b["hypothesis"],"scenario":b.get("scenario"),"success_metrics":b.get("success_metrics",[]),"budget_limit":b.get("budget_limit"),"exposure_limit":b.get("exposure_limit"),"baseline":b.get("baseline",{}),"status":"DRAFT","created_at":now}
+ r=supabase_request("strategy_experiments",method="POST",body=exp,token=token)
+ return jsonify(ok=True,experiment=r)
+
+@app.get("/api/admin/strategy/experiments")
+def list_strategy_experiments():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];r=supabase_request("strategy_experiments?select=*&order=created_at.desc",token=token)
+ return jsonify(ok=True,experiments=r if isinstance(r,list) else [])
+
+@app.post("/api/admin/strategy/experiments/<experiment_id>/decision")
+def decide_strategy_experiment(experiment_id):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};decision=str(b.get("decision","")).upper()
+ if decision not in EXPERIMENT_DECISIONS:return jsonify(error="Invalid experiment decision"),400
+ now=datetime.datetime.utcnow().isoformat()+"Z";body={"status":decision,"decision":decision,"decision_reason":b.get("reason"),"results":b.get("results",{}),"updated_at":now,"completed_at":now if decision in ["COMPLETED","STOPPED","SCALE"] else None}
+ r=supabase_request("strategy_experiments?id=eq."+experiment_id,method="PATCH",body=body,token=token)
+ return jsonify(ok=True,decision=decision,result=r)
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
