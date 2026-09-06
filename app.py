@@ -250,6 +250,16 @@ def order_timeline(status):
  idx=stages.index(status) if status in stages else 0
  return [{"status":s,"label":labels[s],"done":i<=idx,"current":i==idx} for i,s in enumerate(stages)]
 
+@app.get("/api/my-orders/<order_number>/completion-proof")
+def completion_proof(order_number):
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ qc=supabase_request("order_qc?order_number=eq."+order_number+"&select=final_photo_url,qc_status,notes,updated_at&limit=1",token=token)
+ if not isinstance(qc,list) or not qc:return jsonify(available=False)
+ q=qc[0]
+ return jsonify(available=bool(q.get("final_photo_url") and q.get("qc_status")=="APPROVED"),photo_url=q.get("final_photo_url"),qc_status=q.get("qc_status"),completed_at=q.get("updated_at"))
+
 @app.get("/api/my-orders/<order_number>/tracking")
 def customer_tracking(order_number):
  auth=request.headers.get("Authorization","")
