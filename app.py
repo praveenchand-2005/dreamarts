@@ -130,6 +130,32 @@ def create_order_notification(token,order_number,title,message,kind="order_updat
  if isinstance(rows,list) and rows and rows[0].get("user_id"):
   return supabase_request("notifications",method="POST",body={"user_id":rows[0]["user_id"],"order_number":order_number,"title":title,"message":message,"type":kind},token=token,prefer="return=representation")
 
+@app.get("/api/admin/recommendations")
+def admin_recommendations():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1]
+ orders=supabase_request("orders?select=*",token=token);orders=orders if isinstance(orders,list) else []
+ paid=[o for o in orders if str(o.get("payment_status","")).upper() in ("PAID","CAPTURED","SUCCESS")]
+ engines={}
+ for o in paid:
+  try:
+   e=json.loads(o.get("notes") or "{}").get("selected_engine")
+   if e:engines.setdefault(e,{"orders":0,"revenue":0});engines[e]["orders"]+=1;engines[e]["revenue"]+=float(o.get("amount") or o.get("price") or 0)
+  except Exception:pass
+ qc=supabase_request("order_qc?select=qc_status",token=token);qc=qc if isinstance(qc,list) else []
+ open_orders=[o for o in orders if str(o.get("status","")).upper() not in ("DELIVERED","CANCELLED")]
+ rec=[]
+ if open_orders:rec.append({"priority":"HIGH" if len(open_orders)>10 else "MEDIUM","area":"OPERATIONS","title":"Review production capacity","reason":f"{len(open_orders)} orders are currently open.","action":"Review staffing and production queue."})
+ if qc and sum(1 for q in qc if q.get("qc_status")!="APPROVED")/len(qc)>.2:rec.append({"priority":"HIGH","area":"QUALITY","title":"Investigate QC failures","reason":"More than 20% of QC records are not approved.","action":"Review recurring production defects."})
+ if engines:
+  best=max(engines,key=lambda x:engines[x]["revenue"]);rec.append({"priority":"MEDIUM","area":"PRODUCT","title":"Promote the strongest engine","reason":f"{best} currently generates the highest recorded paid revenue.","action":"Feature it more prominently in the Studio."})
+ refs=supabase_request("referrals?select=successful_referrals,reward_balance",token=token);refs=refs if isinstance(refs,list) else []
+ successes=sum(int(x.get("successful_referrals") or 0) for x in refs)
+ rec.append({"priority":"LOW" if successes else "MEDIUM","area":"GROWTH","title":"Review referral performance","reason":f"{successes} successful referral conversions recorded.","action":"Increase referral visibility if conversions remain low."})
+ if not rec:rec.append({"priority":"LOW","area":"DATA","title":"Collect more operating data","reason":"The recommendation engine needs more order history.","action":"Continue normal operations and revisit after additional orders."})
+ return jsonify({"recommendations":rec,"generated_at":datetime.datetime.utcnow().isoformat()+"Z"})
+
 @app.get("/api/admin/insights")
 def admin_insights():
  auth=request.headers.get("Authorization","")
