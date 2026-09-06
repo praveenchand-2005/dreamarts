@@ -1018,6 +1018,27 @@ def evaluate_strategy_experiment(experiment_id):
  r=supabase_request("strategy_experiments?id=eq."+experiment_id,method="PATCH",body={"evaluation":evaluation,"updated_at":evaluation["evaluated_at"]},token=token)
  return jsonify(ok=True,evaluation=evaluation,result=r)
 
+@app.post("/api/admin/predictive-intelligence/forecast")
+def predictive_forecast():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};series=b.get("series") or [];metric=b.get("metric","business_metric")
+ vals=[]
+ for x in series:
+  try:vals.append(float(x.get("value",x) if isinstance(x,dict) else x))
+  except:pass
+ if len(vals)<2:return jsonify(error="At least two historical observations are required"),400
+ changes=[vals[i]-vals[i-1] for i in range(1,len(vals))];trend=sum(changes)/len(changes);recent=sum(vals[-min(3,len(vals)):])/min(3,len(vals))
+ horizon=max(1,min(int(b.get("horizon",3)),12));forecast=[round(vals[-1]+trend*(i+1),2) for i in range(horizon)]
+ volatility=(sum((c-trend)**2 for c in changes)/len(changes))**0.5 if changes else 0
+ direction="GROWING" if trend>0 else "DECLINING" if trend<0 else "STABLE"
+ confidence=round(max(20,min(95,85-(volatility/(abs(recent) or 1))*100)),2)
+ warnings=[]
+ if direction=="DECLINING":warnings.append({"type":"EARLY_WARNING","severity":"HIGH" if abs(trend)>abs(recent)*.1 else "MEDIUM","message":metric+" shows a declining trend"})
+ if volatility>abs(recent)*.2:warnings.append({"type":"VOLATILITY","severity":"MEDIUM","message":metric+" is highly volatile"})
+ opportunity={"detected":direction=="GROWING","message":metric+" has positive momentum"} if direction=="GROWING" else {"detected":False}
+ return jsonify(ok=True,metric=metric,observations=len(vals),current_value=vals[-1],trend_per_period=round(trend,4),trend_direction=direction,forecast=forecast,confidence=confidence,volatility=round(volatility,4),early_warnings=warnings,opportunity=opportunity,generated_at=datetime.datetime.utcnow().isoformat()+"Z")
+
 @app.get("/api/admin/ai-employees")
 def ai_employees():
  auth=request.headers.get("Authorization","")
