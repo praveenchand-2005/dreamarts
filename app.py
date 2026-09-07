@@ -2205,6 +2205,25 @@ def plan_ai_tool():
  policy=tool_policy(name)
  return jsonify(ok=True,policy=policy,execution="APPROVAL_REQUIRED" if policy.get("requires_approval") else "SAFE_TO_EXECUTE")
 
+TOOL_REGISTRY={
+ "memory_search":{"risk":"LOW","handler":"semantic_memory_search"},
+ "evidence_verify":{"risk":"LOW","handler":"verify_evidence"},
+ "business_read":{"risk":"LOW","handler":"read_only"},
+ "experiment_create":{"risk":"MEDIUM","handler":"approval_required"}
+}
+def ai_tool_plan(problem):
+ p=str(problem or "").lower();tools=[]
+ if any(x in p for x in ["history","previous","past","similar"]):tools.append("memory_search")
+ if any(x in p for x in ["verify","evidence","prove","support"]):tools.append("evidence_verify")
+ return {"suggested_tools":tools,"auto_execute":[t for t in tools if TOOL_REGISTRY[t]["risk"]=="LOW"],"approval_required":[t for t in tools if TOOL_REGISTRY[t]["risk"]!="LOW"]}
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_ai_tools():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,plan=ai_tool_plan(b.get("problem","")),registry=TOOL_REGISTRY)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
