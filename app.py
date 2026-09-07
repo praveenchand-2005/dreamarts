@@ -1778,6 +1778,36 @@ def build_ai_context(token,query=None,event_type=None,limit=25):
   context["summary"]["filtered_event_count"]=len(context["sources"]["ai_event_history"])
  return context
 
+def ai_context_relevance(rows,query,fields):
+ q=set(str(query or "").lower().split())
+ scored=[]
+ for row in rows:
+  text=" ".join(str(row.get(k,"")) for k in fields).lower()
+  score=sum(1 for term in q if term in text)
+  if score: scored.append((score,row))
+ return [r for _,r in sorted(scored,key=lambda x:x[0],reverse=True)]
+
+def build_relevant_ai_context(token,query,event_type=None,limit=15):
+ raw=build_ai_context(token,query,event_type,min(limit*3,100))
+ relevant={}
+ config={"products":["name","description","sku"],"orders":["status"],"customers":["email","name"],"ai_event_history":["event_type","data","agent"],"ai_recommendations":["title","recommendation","source_event","risk"],"ai_executions":["action","status"],"ai_learning_memory":["action","lesson"]}
+ for source,fields in config.items():
+  rows=raw["sources"].get(source,[])
+  matches=ai_context_relevance(rows,query,fields)
+  relevant[source]=(matches or rows[:limit])[:limit]
+ summary={"query":query,"event_type":event_type,"total_sources":len(relevant),"retrieved_records":sum(len(v) for v in relevant.values()),"generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ return {"summary":summary,"knowledge":relevant}
+
+@app.post("/api/admin/ai/context/retrieve")
+def retrieve_relevant_ai_context():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};query=str(b.get("query","")).strip()
+ if not query:return jsonify(error="query is required"),400
+ context=build_relevant_ai_context(token,query,str(b.get("event_type","")).upper() or None,min(int(b.get("limit",15)),50))
+ return jsonify(ok=True,context=context)
+
+
 @app.post("/api/admin/ai/context/build")
 def build_ai_context_endpoint():
  auth=request.headers.get("Authorization","")
