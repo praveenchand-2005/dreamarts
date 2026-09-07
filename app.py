@@ -2783,6 +2783,39 @@ def ai_tool_memory_search():
  token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
  return jsonify(ok=True,results=execute_ai_memory_search(str(b.get("query","")),token))
 
+def available_agent_tools():
+ return {
+  "memory_search":{"risk":"LOW","description":"Search institutional semantic memory","requires_approval":False},
+  "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence","requires_approval":False},
+  "scenario_simulate":{"risk":"LOW","description":"Run strategic scenario simulation","requires_approval":False},
+  "experiment_create":{"risk":"MEDIUM","description":"Create a controlled strategic experiment","requires_approval":True}
+ }
+
+def execute_agent_tool(tool_name,args,token):
+ tools=available_agent_tools();spec=tools.get(tool_name)
+ if not spec:return {"ok":False,"error":"Unknown tool"}
+ if tool_name=="memory_search":
+  query=args.get("query","");q=vector_embedding(query);rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  scored=sorted([{"id":r.get("id"),"text":r.get("text"),"similarity":round(cosine_similarity(q,r.get("embedding") or []),4)} for r in rows],key=lambda x:x["similarity"],reverse=True)[:args.get("top_k",5)]
+  return {"ok":True,"tool":tool_name,"results":scored}
+ if tool_name=="evidence_verify":
+  return {"ok":True,"tool":tool_name,"instruction":"Use /api/admin/ai/evidence/verify execution path for supplied claims."}
+ return {"ok":False,"error":"Tool requires controlled workflow or approval"}
+
+@app.get("/api/admin/ai/tools")
+def list_agent_tools():
+ return jsonify(ok=True,tools=available_agent_tools())
+
+@app.post("/api/admin/ai/tools/execute")
+def run_agent_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};name=b.get("tool")
+ spec=available_agent_tools().get(name)
+ if not spec:return jsonify(error="Unknown tool"),404
+ if spec["requires_approval"] and not b.get("approved"):return jsonify(ok=False,status="APPROVAL_REQUIRED",tool=name,risk=spec["risk"]),403
+ return jsonify(execute_agent_tool(name,b.get("args") or {},token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
