@@ -2119,6 +2119,38 @@ def verify_evidence():
  summary={"supported":sum(r["status"]=="SUPPORTED" for r in results),"partial":sum(r["status"]=="PARTIALLY_SUPPORTED" for r in results),"unsupported":sum(r["status"]=="UNSUPPORTED" for r in results)}
  return jsonify(ok=True,results=results,summary=summary,evidence_sources=len(evidence))
 
+AGENT_TOOL_POLICIES={
+ "CEO":["business_metrics","memory_search","scenario_simulation"],
+ "CFO":["business_metrics","memory_search","outcome_history"],
+ "COO":["business_metrics","memory_search"],
+ "CMO":["business_metrics","memory_search"],
+ "CTO":["memory_search"]
+}
+def execute_agent_tool(tool_name,args,token):
+ if tool_name=="memory_search":
+  q=args.get("query",""); emb=vector_embedding(q); rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  ranked=sorted([{"text":r.get("text"),"similarity":cosine_similarity(emb,r.get("embedding") or [])} for r in rows],key=lambda x:x["similarity"],reverse=True)[:5]
+  return {"ok":True,"tool":tool_name,"results":ranked}
+ if tool_name=="outcome_history":
+  return {"ok":True,"tool":tool_name,"results":ai_repo_select("ai_decision_outcomes","*",token,limit=50) or []}
+ if tool_name=="business_metrics":
+  return {"ok":True,"tool":tool_name,"results":[],"note":"Metrics connector ready; no business metrics source configured yet."}
+ return {"ok":False,"error":"tool_not_allowed_or_unknown"}
+
+@app.get("/api/admin/ai/agents/tools")
+def agent_tools():
+ return jsonify(ok=True,policies=AGENT_TOOL_POLICIES)
+
+@app.post("/api/admin/ai/agents/tool-execute")
+def agent_tool_execute():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ agent=str(b.get("agent","")).upper();tool=str(b.get("tool",""))
+ if tool not in AGENT_TOOL_POLICIES.get(agent,[]):return jsonify(error="Tool not permitted for agent"),403
+ result=execute_agent_tool(tool,b.get("args") or {},token)
+ return jsonify(ok=True,agent=agent,result=result,audit={"agent":agent,"tool":tool,"timestamp":datetime.datetime.utcnow().isoformat()+"Z"})
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
