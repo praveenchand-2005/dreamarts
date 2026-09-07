@@ -1798,6 +1798,44 @@ def build_relevant_ai_context(token,query,event_type=None,limit=15):
  summary={"query":query,"event_type":event_type,"total_sources":len(relevant),"retrieved_records":sum(len(v) for v in relevant.values()),"generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
  return {"summary":summary,"knowledge":relevant}
 
+AI_SEMANTIC_ALIASES={
+ "stockout":["out of stock","unavailable","inventory exhausted","no inventory"],
+ "inventory":["stock","warehouse","quantity","replenishment"],
+ "customer":["buyer","shopper","client"],
+ "revenue":["sales","income","gmv"],
+ "profit":["margin","earnings","profitability"],
+ "marketing":["campaign","advertising","promotion"],
+ "conversion":["checkout","purchase rate","funnel"]
+}
+def ai_semantic_terms(query):
+ text=str(query or "").lower();terms=set(text.split())
+ for concept,aliases in AI_SEMANTIC_ALIASES.items():
+  group=[concept]+aliases
+  if any(x in text for x in group):
+   terms.update(" ".join(group).split())
+ return terms
+def ai_semantic_score(row,query,fields):
+ text=" ".join(str(row.get(k,"")) for k in fields).lower();terms=ai_semantic_terms(query)
+ return sum(1 for t in terms if t in text)
+def ai_semantic_memory_search(token,query,limit=20):
+ sources={"ai_event_history":["event_type","data","agent"],"ai_recommendations":["title","recommendation","source_event"],"ai_executions":["action","outcome","status"],"ai_learning_memory":["action","lesson","outcome"]}
+ results=[]
+ for source,fields in sources.items():
+  for row in ai_context_fetch(token,source,100):
+   score=ai_semantic_score(row,query,fields)
+   if score>0:results.append({"source":source,"similarity_score":score,"record":row})
+ return sorted(results,key=lambda x:x["similarity_score"],reverse=True)[:limit]
+
+@app.post("/api/admin/ai/memory/semantic-search")
+def semantic_ai_memory_search():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};query=str(b.get("query","")).strip()
+ if not query:return jsonify(error="query is required"),400
+ results=ai_semantic_memory_search(token,query,min(int(b.get("limit",20)),100))
+ return jsonify(ok=True,query=query,expanded_terms=sorted(ai_semantic_terms(query)),count=len(results),results=results)
+
+
 @app.post("/api/admin/ai/context/retrieve")
 def retrieve_relevant_ai_context():
  auth=request.headers.get("Authorization","")
