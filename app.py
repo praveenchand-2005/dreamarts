@@ -2356,6 +2356,30 @@ def plan_agent_tools():
  if not goal:return jsonify(error="goal is required"),400
  return jsonify(ok=True,plan=agent_tool_plan(goal,b.get("available_tools")))
 
+AI_TOOL_REGISTRY={
+ "memory_search":{"risk":"LOW","description":"Search institutional memory","requires_approval":False},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence","requires_approval":False},
+ "scenario_simulate":{"risk":"LOW","description":"Run strategic scenario simulation","requires_approval":False},
+ "experiment_create":{"risk":"MEDIUM","description":"Create bounded strategic experiment","requires_approval":True}
+}
+
+def authorize_ai_tool(tool_name,role="FOUNDER",approved=False):
+ tool=AI_TOOL_REGISTRY.get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if tool["requires_approval"] and not approved:return {"allowed":False,"reason":"FOUNDER_APPROVAL_REQUIRED","tool":tool_name}
+ return {"allowed":True,"tool":tool_name,"risk":tool["risk"],"role":role}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=AI_TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,authorization=authorize_ai_tool(b.get("tool"),b.get("role","FOUNDER"),bool(b.get("approved",False))))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
