@@ -2001,6 +2001,33 @@ def classify_council_conflicts(outputs,agreement_map):
  return {"conflicts":conflicts,"unresolved_count":len(conflicts),"governance":"Conflicts are classified heuristically and must not be silently collapsed into majority opinion."}
 
 
+def calculate_decision_calibration(prediction,actual):
+ p=float(prediction or 0);a=float(actual or 0)
+ p=max(0,min(1,p));a=max(0,min(1,a))
+ error=abs(p-a);accuracy=max(0,1-error)
+ return {"predicted_score":p,"actual_score":a,"absolute_error":round(error,3),"calibration_accuracy":round(accuracy,3)}
+
+@app.post("/api/admin/ai/outcomes/record")
+def record_ai_outcome():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ decision_id=str(b.get("decision_id","")).strip()
+ if not decision_id:return jsonify(error="decision_id is required"),400
+ predicted=b.get("predicted_score");actual=b.get("actual_score")
+ calibration=calculate_decision_calibration(predicted,actual)
+ record={"id":"outcome_"+uuid.uuid4().hex[:12],"decision_id":decision_id,"actual_outcome":b.get("actual_outcome"),"metrics":b.get("metrics",{}),"calibration":calibration,"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ stored=ai_repo_insert("ai_decision_outcomes",record,token)
+ return jsonify(ok=True,outcome=record,persistence_mode="postgres" if stored is not None else "fallback")
+
+@app.get("/api/admin/ai/outcomes/calibration")
+def ai_outcome_calibration():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];rows=ai_repo_select("ai_decision_outcomes","*",token,limit=200) or []
+ vals=[r.get("calibration",{}).get("calibration_accuracy") for r in rows if isinstance(r.get("calibration"),dict) and r.get("calibration",{}).get("calibration_accuracy") is not None]
+ return jsonify(ok=True,sample_size=len(vals),average_calibration=round(sum(vals)/len(vals),3) if vals else None,outcomes=rows)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
