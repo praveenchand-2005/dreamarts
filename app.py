@@ -2546,6 +2546,39 @@ def agent_tool_execute():
  token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
  return jsonify(execute_agent_tool(b.get("tool"),b.get("args",{}),token))
 
+AI_TOOL_REGISTRY={
+ "memory_search":{"risk":"LOW","description":"Search institutional semantic memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario simulation"}
+}
+def ai_tool_policy(tool_name,approved=False):
+ tool=AI_TOOL_REGISTRY.get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if tool["risk"]=="LOW":return {"allowed":True,"reason":"LOW_RISK"}
+ if approved:return {"allowed":True,"reason":"EXPLICIT_APPROVAL"}
+ return {"allowed":False,"reason":"APPROVAL_REQUIRED"}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=AI_TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/execute")
+def execute_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ name=b.get("tool");policy=ai_tool_policy(name,bool(b.get("approved")))
+ if not policy["allowed"]:return jsonify(ok=False,policy=policy),403
+ args=b.get("arguments",{})
+ if name=="memory_search":
+  q=vector_embedding(args.get("query",""));rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  out=sorted([{"id":r.get("id"),"text":r.get("text"),"similarity":cosine_similarity(q,r.get("embedding") or [])} for r in rows],key=lambda x:x["similarity"],reverse=True)[:args.get("top_k",5)]
+ elif name=="evidence_verify":
+  out=[verify_ai_claim(x,ai_repo_select("ai_memory_vectors","*",token,limit=200) or []) for x in args.get("claims",[])]
+ else:
+  out={"message":"Scenario simulation requires its existing dedicated endpoint"}
+ return jsonify(ok=True,tool=name,policy=policy,result=out)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
