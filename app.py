@@ -1843,6 +1843,23 @@ def build_context_aware_agent_payload(token,agent,query,event_type=None,limit=12
  brief=ai_context_brief(token,query,event_type,limit)
  return {"agent":agent,"query":query,"event_type":event_type,"context_brief":brief,"runtime_instruction":"Use this institutional context as evidence. Distinguish facts, historical lessons, assumptions and uncertainty. Do not claim outcomes are guaranteed.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
 
+def build_council_context(token,problem,event_type=None,agents=None,limit=12):
+ agents=agents or ["CEO","CFO","COO","CMO","CTO"]
+ shared=ai_context_brief(token,problem,event_type,limit)
+ runtimes={agent:{"agent":agent,"shared_context":shared,"instruction":f"Analyze the problem from the {agent} executive perspective. Use shared evidence, identify assumptions and uncertainty, and provide an independent recommendation."} for agent in agents}
+ return {"problem":problem,"event_type":event_type,"shared_context":shared,"agent_runtime_contexts":runtimes,"council_instruction":"All agents analyze independently from the same evidence base before deliberation and synthesis.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+
+@app.post("/api/admin/ai/council/context")
+def build_council_context_endpoint():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};problem=str(b.get("problem","")).strip()
+ if not problem:return jsonify(error="problem is required"),400
+ agents=[str(x).upper() for x in b.get("agents",[]) if str(x).strip()] or None
+ payload=build_council_context(token,problem,str(b.get("event_type","")).upper() or None,agents,min(int(b.get("limit",12)),40))
+ return jsonify(ok=True,council_context=payload)
+
+
 @app.post("/api/admin/ai/runtime/context")
 def ai_context_aware_runtime():
  auth=request.headers.get("Authorization","")
