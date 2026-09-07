@@ -1839,6 +1839,20 @@ def ai_context_brief(token,query,event_type=None,limit=15):
   if len(rows)>1:patterns.append(f"{source}: {len(rows)} relevant records retrieved")
  return {"query":query,"event_type":event_type,"generated_at":datetime.datetime.utcnow().isoformat()+"Z","executive_brief":{"key_facts":facts[:20],"patterns":patterns,"historical_lessons":lessons[:10],"known_risks":risks[:10],"semantic_matches":semantic[:10],"decision_context":"Use retrieved evidence as decision support; validate against live business data before execution."}}
 
+def build_context_aware_agent_payload(token,agent,query,event_type=None,limit=12):
+ brief=ai_context_brief(token,query,event_type,limit)
+ return {"agent":agent,"query":query,"event_type":event_type,"context_brief":brief,"runtime_instruction":"Use this institutional context as evidence. Distinguish facts, historical lessons, assumptions and uncertainty. Do not claim outcomes are guaranteed.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+
+@app.post("/api/admin/ai/runtime/context")
+def ai_context_aware_runtime():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};query=str(b.get("query","")).strip();agent=str(b.get("agent","GENERALIST")).upper()
+ if not query:return jsonify(error="query is required"),400
+ payload=build_context_aware_agent_payload(token,agent,query,str(b.get("event_type","")).upper() or None,min(int(b.get("limit",12)),40))
+ return jsonify(ok=True,runtime=payload)
+
+
 @app.post("/api/admin/ai/context/brief")
 def build_ai_context_brief():
  auth=request.headers.get("Authorization","")
