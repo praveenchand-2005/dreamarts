@@ -2764,6 +2764,25 @@ def plan_ai_tool_use():
  requested=b.get("tools") or []
  return jsonify(ok=True,plan=[agent_tool_policy(x) for x in requested],governance="Tool execution must remain approval-controlled; planning does not execute actions.")
 
+AI_TOOL_REGISTRY={"memory_search":{"description":"Search institutional memory","risk":"LOW"}}
+
+def execute_ai_memory_search(query,token):
+ q=vector_embedding(query)
+ rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+ ranked=sorted([{"id":r.get("id"),"text":r.get("text"),"similarity":cosine_similarity(q,r.get("embedding") or [])} for r in rows],key=lambda x:x["similarity"],reverse=True)[:5]
+ return ranked
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=AI_TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/memory-search")
+def ai_tool_memory_search():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,results=execute_ai_memory_search(str(b.get("query","")),token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
