@@ -2028,6 +2028,34 @@ def ai_outcome_calibration():
  vals=[r.get("calibration",{}).get("calibration_accuracy") for r in rows if isinstance(r.get("calibration"),dict) and r.get("calibration",{}).get("calibration_accuracy") is not None]
  return jsonify(ok=True,sample_size=len(vals),average_calibration=round(sum(vals)/len(vals),3) if vals else None,outcomes=rows)
 
+def agent_domain_score(agent,domain,token):
+ rows=ai_repo_select("ai_agent_outcomes","*",token,limit=500) or []
+ vals=[r.get("calibration_accuracy") for r in rows if str(r.get("agent","")).upper()==str(agent).upper() and (not domain or str(r.get("domain","")).upper()==str(domain).upper()) and r.get("calibration_accuracy") is not None]
+ if not vals:return {"agent":agent,"domain":domain,"sample_size":0,"performance_score":None,"weight":1.0}
+ score=sum(float(x) for x in vals)/len(vals)
+ weight=round(max(.5,min(1.5,.5+score)),3)
+ return {"agent":agent,"domain":domain,"sample_size":len(vals),"performance_score":round(score,3),"weight":weight}
+
+@app.post("/api/admin/ai/agents/outcomes/record")
+def record_agent_outcome():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ agent=str(b.get("agent","")).upper();domain=str(b.get("domain","")).upper()
+ if not agent or not domain:return jsonify(error="agent and domain are required"),400
+ c=calculate_decision_calibration(b.get("predicted_score"),b.get("actual_score"))
+ record={"id":"agentout_"+uuid.uuid4().hex[:12],"agent":agent,"domain":domain,"decision_id":b.get("decision_id"),"calibration_accuracy":c["calibration_accuracy"],"absolute_error":c["absolute_error"],"recorded_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ stored=ai_repo_insert("ai_agent_outcomes",record,token)
+ return jsonify(ok=True,outcome=record,persistence_mode="postgres" if stored is not None else "fallback")
+
+@app.get("/api/admin/ai/agents/performance")
+def agent_performance():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];domain=request.args.get("domain","").upper()
+ agents=["CEO","CFO","COO","CMO","CTO"]
+ return jsonify(ok=True,domain=domain or "ALL",agents=[agent_domain_score(x,domain,token) for x in agents])
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
