@@ -2224,6 +2224,28 @@ def plan_ai_tools():
  b=request.get_json(silent=True) or {}
  return jsonify(ok=True,plan=ai_tool_plan(b.get("problem","")),registry=TOOL_REGISTRY)
 
+TOOL_REGISTRY={
+ "institutional_memory_search":{"risk":"LOW","description":"Search approved institutional memory","handler":"memory_search"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against approved evidence","handler":"evidence_verify"},
+ "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario simulation","handler":"scenario_simulate"}
+}
+def agent_tool_request(tool_name,arguments,token):
+ tool=TOOL_REGISTRY.get(tool_name)
+ if not tool:return {"ok":False,"error":"Unknown or unapproved tool"}
+ if not isinstance(arguments,dict):return {"ok":False,"error":"Tool arguments must be an object"}
+ return {"ok":True,"tool":tool_name,"risk":tool["risk"],"requires_approval":tool["risk"]!="LOW","arguments":arguments,"status":"READY" if tool["risk"]=="LOW" else "PENDING_APPROVAL"}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/request")
+def request_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ return jsonify(agent_tool_request(b.get("tool"),b.get("arguments",{}),token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
