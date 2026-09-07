@@ -1986,6 +1986,21 @@ def council_agreement_map(outputs):
  return {"claims":claims,"pairwise_relationships":pairs,"consensus_agents":consensus,"minority_agents":minority,"potential_contradictions":contradictions,"note":"Heuristic lexical agreement map. Potential contradictions require LLM or evidence-level semantic review."}
 
 
+def classify_council_conflicts(outputs,agreement_map):
+ claims=agreement_map.get("claims",{}); conflicts=[]
+ for p in agreement_map.get("potential_contradictions",[]):
+  x,y=p["agents"]; dx=(outputs.get(x) or {}).get("structured") or {};dy=(outputs.get(y) or {}).get("structured") or {}
+  ax=len(dx.get("assumptions") or []);ay=len(dy.get("assumptions") or [])
+  ex=len(dx.get("evidence") or []);ey=len(dy.get("evidence") or [])
+  rx=len(dx.get("risks") or []);ry=len(dy.get("risks") or [])
+  conflict_type="PRIORITY_CONFLICT"
+  if abs(ax-ay)>=2: conflict_type="ASSUMPTION_CONFLICT"
+  elif abs(ex-ey)>=2: conflict_type="EVIDENCE_CONFLICT"
+  elif abs(rx-ry)>=2: conflict_type="RISK_TOLERANCE_CONFLICT"
+  conflicts.append({"agents":[x,y],"type":conflict_type,"claims":{x:claims.get(x,[]),y:claims.get(y,[])},"evidence_counts":{x:ex,y:ey},"assumption_counts":{x:ax,y:ay},"resolution":"Require reviewer to compare supporting evidence and preserve unresolved conflict for founder review."})
+ return {"conflicts":conflicts,"unresolved_count":len(conflicts),"governance":"Conflicts are classified heuristically and must not be silently collapsed into majority opinion."}
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
@@ -1995,11 +2010,12 @@ def execute_live_council(token,problem,event_type=None,agents=None,limit=12,mode
   result=validated_nvidia_call(council_agent_prompt(agent,problem,context),["position","evidence","assumptions","risks","recommendation","confidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
   outputs[agent]=attach_council_reliability(result,str(context))
  agreement_map=council_agreement_map(outputs)
- challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses and the heuristic agreement map. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"agreement_map":agreement_map},default=str)}]
+ conflict_map=classify_council_conflicts(outputs,agreement_map)
+ challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses and the heuristic agreement map. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"agreement_map":agreement_map,"conflict_map":conflict_map},default=str)}]
  challenge=attach_council_reliability(validated_nvidia_call(challenge_prompt,["challenges","agreements","disagreements","missing_evidence"],model=model,temperature=0.2,max_tokens=3000,retries=1),str(context))
  synthesis_prompt=[{"role":"system","content":"You are Dreamarts Council Synthesis. Produce valid JSON: ranked_options, tradeoffs, dissenting_views, confidence, recommended_next_action. This is decision support, not autonomous execution."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"challenge":challenge},default=str)}]
  synthesis=attach_council_reliability(validated_nvidia_call(synthesis_prompt,["ranked_options","tradeoffs","dissenting_views","confidence","recommended_next_action"],model=model,temperature=0.15,max_tokens=4000,retries=1),str(context))
- return {"runtime":runtime,"agent_outputs":outputs,"agreement_map":agreement_map,"challenge":challenge,"synthesis":synthesis}
+ return {"runtime":runtime,"agent_outputs":outputs,"agreement_map":agreement_map,"conflict_map":conflict_map,"challenge":challenge,"synthesis":synthesis}
 
 @app.post("/api/admin/ai/council/live")
 def run_live_council():
