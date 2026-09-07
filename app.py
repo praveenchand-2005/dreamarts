@@ -1826,6 +1826,29 @@ def ai_semantic_memory_search(token,query,limit=20):
    if score>0:results.append({"source":source,"similarity_score":score,"record":row})
  return sorted(results,key=lambda x:x["similarity_score"],reverse=True)[:limit]
 
+def ai_context_brief(token,query,event_type=None,limit=15):
+ ctx=build_relevant_ai_context(token,query,event_type,limit);semantic=ai_semantic_memory_search(token,query,limit)
+ facts=[];lessons=[];risks=[];sources=ctx.get("knowledge",{})
+ for source,rows in sources.items():
+  for row in rows[:5]:
+   if source=="ai_learning_memory" and row.get("lesson"):lessons.append(row["lesson"])
+   if source=="ai_recommendations" and row.get("risk"):risks.append(row["risk"])
+   facts.append({"source":source,"id":row.get("id"),"summary":str(row)[:350]})
+ patterns=[]
+ for source,rows in sources.items():
+  if len(rows)>1:patterns.append(f"{source}: {len(rows)} relevant records retrieved")
+ return {"query":query,"event_type":event_type,"generated_at":datetime.datetime.utcnow().isoformat()+"Z","executive_brief":{"key_facts":facts[:20],"patterns":patterns,"historical_lessons":lessons[:10],"known_risks":risks[:10],"semantic_matches":semantic[:10],"decision_context":"Use retrieved evidence as decision support; validate against live business data before execution."}}
+
+@app.post("/api/admin/ai/context/brief")
+def build_ai_context_brief():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};query=str(b.get("query","")).strip()
+ if not query:return jsonify(error="query is required"),400
+ brief=ai_context_brief(token,query,str(b.get("event_type","")).upper() or None,min(int(b.get("limit",15)),50))
+ return jsonify(ok=True,brief=brief)
+
+
 @app.post("/api/admin/ai/memory/semantic-search")
 def semantic_ai_memory_search():
  auth=request.headers.get("Authorization","")
