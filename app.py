@@ -2093,6 +2093,32 @@ def semantic_memory_search():
  scored.sort(key=lambda x:x["similarity"],reverse=True)
  return jsonify(ok=True,results=scored[:int(b.get("top_k",10))])
 
+def verify_ai_claim(claim,evidence_rows):
+ text=str(claim or "").lower()
+ if not text:return {"claim":claim,"status":"UNSUPPORTED","support_score":0,"matches":[]}
+ terms=set(re.findall(r"\b[a-zA-Z]{4,}\b",text))
+ matches=[]
+ for row in evidence_rows or []:
+  blob=json.dumps(row,default=str).lower(); overlap=sum(1 for t in terms if t in blob)
+  if overlap:matches.append({"source_id":row.get("id"),"overlap":overlap})
+ matches.sort(key=lambda x:x["overlap"],reverse=True)
+ score=min(1.0,(matches[0]["overlap"]/max(1,len(terms))) if matches else 0)
+ status="SUPPORTED" if score>=.35 else ("PARTIALLY_SUPPORTED" if score>=.12 else "UNSUPPORTED")
+ return {"claim":claim,"status":status,"support_score":round(score,3),"matches":matches[:5],"note":"Heuristic evidence matching; semantic or source-specific verification may be added per connector."}
+
+@app.post("/api/admin/ai/evidence/verify")
+def verify_evidence():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ claims=b.get("claims") or ([b.get("claim")] if b.get("claim") else [])
+ memory=ai_repo_select("ai_memory_vectors","*",token,limit=300) or []
+ outcomes=ai_repo_select("ai_decision_outcomes","*",token,limit=200) or []
+ evidence=memory+outcomes
+ results=[verify_ai_claim(c,evidence) for c in claims]
+ summary={"supported":sum(r["status"]=="SUPPORTED" for r in results),"partial":sum(r["status"]=="PARTIALLY_SUPPORTED" for r in results),"unsupported":sum(r["status"]=="UNSUPPORTED" for r in results)}
+ return jsonify(ok=True,results=results,summary=summary,evidence_sources=len(evidence))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
