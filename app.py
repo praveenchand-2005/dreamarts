@@ -2612,6 +2612,34 @@ def plan_ai_tool_use():
   plan.append({"name":name,"args":args,"registered":name in registry,"risk":registry.get(name,{}).get("risk","UNKNOWN"),"guard":guard})
  return jsonify(ok=True,plan=plan,governance="Tool execution must pass permission and risk checks; planning does not execute external actions.")
 
+AI_TOOL_REGISTRY={
+ "institutional_memory_search":{"risk":"LOW","description":"Search stored institutional memory"},
+ "semantic_memory_search":{"risk":"LOW","description":"Search vector semantic memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario simulation"}
+}
+
+def ai_tool_plan(goal,allowed_tools=None):
+ allowed=allowed_tools or list(AI_TOOL_REGISTRY.keys())
+ g=str(goal or "").lower();plan=[]
+ if any(x in g for x in ["history","previous","past","remember"]):plan.append("institutional_memory_search")
+ if any(x in g for x in ["similar","semantic","related"]):plan.append("semantic_memory_search")
+ if any(x in g for x in ["verify","evidence","support","true"]):plan.append("evidence_verify")
+ if any(x in g for x in ["strategy","option","scenario","compare"]):plan.append("scenario_simulate")
+ return [x for x in plan if x in allowed]
+
+@app.post("/api/admin/ai/tools/plan")
+def ai_tools_plan():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ plan=ai_tool_plan(b.get("goal",""),b.get("allowed_tools"))
+ return jsonify(ok=True,goal=b.get("goal"),tool_plan=[{"tool":x,**AI_TOOL_REGISTRY[x]} for x in plan],requires_founder_approval=any(AI_TOOL_REGISTRY[x]["risk"]!="LOW" for x in plan))
+
+@app.get("/api/admin/ai/tools")
+def ai_tools_list():
+ return jsonify(ok=True,tools=AI_TOOL_REGISTRY)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
