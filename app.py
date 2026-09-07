@@ -1910,6 +1910,33 @@ def nvidia_provider_chat():
  result=nvidia_chat(messages,b.get("model"),float(b.get("temperature",0.2)),min(int(b.get("max_tokens",4096)),8192))
  return jsonify(result), (200 if result.get("ok") else 503)
 
+def council_agent_prompt(agent,problem,context):
+ return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
+
+def execute_live_council(token,problem,event_type=None,agents=None,limit=12,model=None):
+ runtime=build_agent_deliberation_runtime(token,problem,event_type,agents,limit);context=runtime["shared_context"];outputs={}
+ for agent in runtime["participants"]:
+  result=nvidia_chat(council_agent_prompt(agent,problem,context),model=model,temperature=0.2,max_tokens=3000)
+  outputs[agent]=result
+ challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs},default=str)}]
+ challenge=nvidia_chat(challenge_prompt,model=model,temperature=0.2,max_tokens=3000)
+ synthesis_prompt=[{"role":"system","content":"You are Dreamarts Council Synthesis. Produce valid JSON: ranked_options, tradeoffs, dissenting_views, confidence, recommended_next_action. This is decision support, not autonomous execution."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"challenge":challenge},default=str)}]
+ synthesis=nvidia_chat(synthesis_prompt,model=model,temperature=0.15,max_tokens=4000)
+ return {"runtime":runtime,"agent_outputs":outputs,"challenge":challenge,"synthesis":synthesis}
+
+@app.post("/api/admin/ai/council/live")
+def run_live_council():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};problem=str(b.get("problem","")).strip()
+ if not problem:return jsonify(error="problem is required"),400
+ agents=[str(x).upper() for x in b.get("agents",[]) if str(x).strip()] or None
+ run_id="council_"+uuid.uuid4().hex[:12]
+ result=execute_live_council(token,problem,str(b.get("event_type","")).upper() or None,agents,min(int(b.get("limit",12)),30),b.get("model"))
+ record={"id":run_id,"problem":problem,"status":"COMPLETED" if result["synthesis"].get("ok") else "FAILED","result":result,"created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ stored=ai_repo_insert("ai_council_runs",record,token)
+ return jsonify(ok=True,run_id=run_id,persistence_mode="postgres" if stored is not None else "fallback",result=result)
+
 @app.post("/api/admin/ai/council/execute")
 def execute_council_plan():
  auth=request.headers.get("Authorization","")
