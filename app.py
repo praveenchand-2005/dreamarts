@@ -1961,6 +1961,31 @@ def attach_council_reliability(result,context_text=""):
  return result
 
 
+def normalize_claims(data):
+ if not isinstance(data,dict):return []
+ claims=[]
+ for key in ("position","recommendation","recommended_next_action"):
+  v=data.get(key)
+  if isinstance(v,str) and v.strip():claims.append(v.strip().lower())
+ return claims
+
+def council_agreement_map(outputs):
+ agents=list(outputs.keys());claims={a:normalize_claims((outputs[a] or {}).get("structured") or {}) for a in agents}
+ pairs=[];consensus=[];minority=[]
+ for i,a in enumerate(agents):
+  for b in agents[i+1:]:
+   ca=" ".join(claims[a]);cb=" ".join(claims[b])
+   overlap=len(set(re.findall(r"\b\w{5,}\b",ca)) & set(re.findall(r"\b\w{5,}\b",cb)))
+   pairs.append({"agents":[a,b],"similarity_signal":overlap,"relationship":"AGREEMENT_SIGNAL" if overlap>=2 else "POSSIBLE_DIVERGENCE"})
+ for a in agents:
+  if claims[a]:
+   related=sum(1 for p in pairs if a in p["agents"] and p["relationship"]=="AGREEMENT_SIGNAL")
+   if related>=max(1,(len(agents)-1)//2):consensus.append(a)
+   elif related==0:minority.append(a)
+ contradictions=[p for p in pairs if p["relationship"]=="POSSIBLE_DIVERGENCE"]
+ return {"claims":claims,"pairwise_relationships":pairs,"consensus_agents":consensus,"minority_agents":minority,"potential_contradictions":contradictions,"note":"Heuristic lexical agreement map. Potential contradictions require LLM or evidence-level semantic review."}
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
@@ -1969,11 +1994,12 @@ def execute_live_council(token,problem,event_type=None,agents=None,limit=12,mode
  for agent in runtime["participants"]:
   result=validated_nvidia_call(council_agent_prompt(agent,problem,context),["position","evidence","assumptions","risks","recommendation","confidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
   outputs[agent]=attach_council_reliability(result,str(context))
- challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs},default=str)}]
+ agreement_map=council_agreement_map(outputs)
+ challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses and the heuristic agreement map. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"agreement_map":agreement_map},default=str)}]
  challenge=attach_council_reliability(validated_nvidia_call(challenge_prompt,["challenges","agreements","disagreements","missing_evidence"],model=model,temperature=0.2,max_tokens=3000,retries=1),str(context))
  synthesis_prompt=[{"role":"system","content":"You are Dreamarts Council Synthesis. Produce valid JSON: ranked_options, tradeoffs, dissenting_views, confidence, recommended_next_action. This is decision support, not autonomous execution."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"challenge":challenge},default=str)}]
  synthesis=attach_council_reliability(validated_nvidia_call(synthesis_prompt,["ranked_options","tradeoffs","dissenting_views","confidence","recommended_next_action"],model=model,temperature=0.15,max_tokens=4000,retries=1),str(context))
- return {"runtime":runtime,"agent_outputs":outputs,"challenge":challenge,"synthesis":synthesis}
+ return {"runtime":runtime,"agent_outputs":outputs,"agreement_map":agreement_map,"challenge":challenge,"synthesis":synthesis}
 
 @app.post("/api/admin/ai/council/live")
 def run_live_council():
