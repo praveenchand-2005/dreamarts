@@ -2688,6 +2688,30 @@ def authorize_ai_tool():
  b=request.get_json(silent=True) or {}
  return jsonify(ok=True,tool=b.get("tool"),authorization=authorize_agent_tool(b.get("tool",""),b.get("agent","")))
 
+DREAMARTS_AGENT_TOOLS={
+ "memory_search":{"risk":"LOW","description":"Search institutional memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario simulation"},
+ "experiment_create":{"risk":"MEDIUM","description":"Create bounded strategic experiment"}
+}
+
+def authorize_agent_tool(tool_name,agent,context=None):
+ tool=DREAMARTS_AGENT_TOOLS.get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if tool["risk"]=="LOW":return {"allowed":True,"reason":"LOW_RISK_AUTOMATIC"}
+ return {"allowed":False,"reason":"APPROVAL_REQUIRED","approval_scope":tool["risk"]}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=DREAMARTS_AGENT_TOOLS)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ b=request.get_json(silent=True) or {}
+ tool=str(b.get("tool",""));agent=str(b.get("agent",""))
+ if not tool or not agent:return jsonify(error="tool and agent are required"),400
+ return jsonify(ok=True,authorization=authorize_agent_tool(tool,agent,b.get("context")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
