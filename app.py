@@ -2056,6 +2056,43 @@ def agent_performance():
  agents=["CEO","CFO","COO","CMO","CTO"]
  return jsonify(ok=True,domain=domain or "ALL",agents=[agent_domain_score(x,domain,token) for x in agents])
 
+def vector_embedding(text,model=None):
+ text=str(text or "").strip()
+ if not text:return []
+ model=model or os.getenv("NVIDIA_EMBED_MODEL","nvidia/nv-embed-v1")
+ try:
+  r=requests.post("https://integrate.api.nvidia.com/v1/embeddings",headers={"Authorization":"Bearer "+os.getenv("NVIDIA_API_KEY",""),"Content-Type":"application/json"},json={"model":model,"input":text,"encoding_format":"float"},timeout=20)
+  if r.ok:return r.json().get("data",[{}])[0].get("embedding",[])
+ except Exception:pass
+ return []
+
+def cosine_similarity(a,b):
+ if not a or not b:return 0.0
+ n=min(len(a),len(b));dot=sum(float(a[i])*float(b[i]) for i in range(n))
+ na=sum(float(x)*float(x) for x in a[:n])**.5;nb=sum(float(x)*float(x) for x in b[:n])**.5
+ return dot/(na*nb) if na and nb else 0.0
+
+@app.post("/api/admin/memory/embed")
+def embed_memory():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};text_value=b.get("text","")
+ emb=vector_embedding(text_value)
+ if not emb:return jsonify(error="Embedding unavailable"),502
+ record={"id":"memvec_"+uuid.uuid4().hex[:12],"text":text_value,"embedding":emb,"metadata":b.get("metadata",{}),"created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ ai_repo_insert("ai_memory_vectors",record,token)
+ return jsonify(ok=True,id=record["id"],dimensions=len(emb))
+
+@app.post("/api/admin/memory/semantic-search")
+def semantic_memory_search():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};q=vector_embedding(b.get("query",""))
+ rows=ai_repo_select("ai_memory_vectors","*",token,limit=int(b.get("limit",100))) or []
+ scored=[{"id":r.get("id"),"text":r.get("text"),"metadata":r.get("metadata",{}),"similarity":round(cosine_similarity(q,r.get("embedding") or []),4)} for r in rows]
+ scored.sort(key=lambda x:x["similarity"],reverse=True)
+ return jsonify(ok=True,results=scored[:int(b.get("top_k",10))])
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
