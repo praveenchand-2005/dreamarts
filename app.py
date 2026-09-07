@@ -1910,6 +1910,35 @@ def nvidia_provider_chat():
  result=nvidia_chat(messages,b.get("model"),float(b.get("temperature",0.2)),min(int(b.get("max_tokens",4096)),8192))
  return jsonify(result), (200 if result.get("ok") else 503)
 
+def parse_ai_json(content,required_fields=None):
+ required_fields=required_fields or []
+ if not isinstance(content,str): return {"ok":False,"error":"AI content is not text","data":None}
+ candidates=[content]
+ m=re.search(r"\{[\s\S]*\}",content)
+ if m:candidates.insert(0,m.group(0))
+ for raw in candidates:
+  try:
+   data=json.loads(raw)
+   missing=[k for k in required_fields if k not in data]
+   if missing:return {"ok":False,"error":"missing_fields:"+",".join(missing),"data":data}
+   return {"ok":True,"data":data,"error":None}
+  except Exception:pass
+ return {"ok":False,"error":"invalid_json","data":None}
+
+def validated_nvidia_call(messages,required_fields,model=None,temperature=0.2,max_tokens=4096,retries=1):
+ result=nvidia_chat(messages,model,temperature,max_tokens)
+ parsed=parse_ai_json(result.get("content",""),required_fields)
+ if parsed["ok"]:
+  result["structured"]=parsed["data"];result["validated"]=True;return result
+ for _ in range(retries):
+  repair=[{"role":"system","content":"Return ONLY valid JSON. Preserve the intended answer and include all required fields: "+", ".join(required_fields)},{"role":"user","content":result.get("content","")}]
+  retry=nvidia_chat(repair,model,0,max_tokens)
+  parsed=parse_ai_json(retry.get("content",""),required_fields)
+  if parsed["ok"]:
+   retry["structured"]=parsed["data"];retry["validated"]=True;return retry
+ result["validated"]=False;result["validation_error"]=parsed.get("error");return result
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
