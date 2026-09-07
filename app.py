@@ -2457,6 +2457,32 @@ def authorize_ai_tool():
  decision=agent_tool_permission(b.get("agent"),b.get("tool"))
  return jsonify(ok=True,agent=str(b.get("agent","")).upper(),tool=b.get("tool"),authorization=decision)
 
+DREAMARTS_TOOLS={
+ "memory_search":{"risk":"LOW","handler":"semantic_memory_search","description":"Search institutional semantic memory"},
+ "evidence_verify":{"risk":"LOW","handler":"verify_evidence","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","handler":"scenario_simulate","description":"Run strategic scenario analysis"}
+}
+def plan_agent_tools(task,agent,allowed=None):
+ allowed=allowed or list(DREAMARTS_TOOLS.keys())
+ text=(str(task)+" "+str(agent)).lower();plan=[]
+ if any(x in text for x in ["history","previous","memory","past"]):plan.append("memory_search")
+ if any(x in text for x in ["verify","evidence","claim","fact"]):plan.append("evidence_verify")
+ if any(x in text for x in ["scenario","option","strategy","compare"]):plan.append("scenario_simulate")
+ return {"agent":agent,"selected_tools":[x for x in plan if x in allowed],"available_tools":allowed,"requires_approval":[x for x in plan if DREAMARTS_TOOLS[x]["risk"]!="LOW"]}
+
+@app.post("/api/admin/ai/tools/plan")
+def ai_tool_plan():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ task=str(b.get("task","")).strip();agent=str(b.get("agent","GENERAL"))
+ if not task:return jsonify(error="task is required"),400
+ return jsonify(ok=True,plan=plan_agent_tools(task,agent,b.get("allowed_tools")))
+
+@app.get("/api/admin/ai/tools")
+def ai_tools():
+ return jsonify(ok=True,tools=DREAMARTS_TOOLS)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
