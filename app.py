@@ -2432,6 +2432,31 @@ def authorize_ai_tool():
  b=request.get_json(silent=True) or {}
  return jsonify(ok=True,authorization=authorize_agent_tool(b.get("tool"),bool(b.get("approved",False))))
 
+AI_TOOL_REGISTRY={
+ "memory_search":{"risk":"LOW","handler":"semantic_memory_search","description":"Search institutional semantic memory"},
+ "evidence_verify":{"risk":"LOW","handler":"verify_evidence","description":"Verify claims against available evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","handler":"scenario_simulate","description":"Run decision-support scenario analysis"},
+ "experiment_create":{"risk":"MEDIUM","handler":"experiment_create","description":"Create bounded strategic experiment"}
+}
+
+def agent_tool_permission(agent,tool_name):
+ tool=AI_TOOL_REGISTRY.get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ allowed={"CEO":["memory_search","evidence_verify","scenario_simulate","experiment_create"],"CFO":["memory_search","evidence_verify","scenario_simulate"],"COO":["memory_search","evidence_verify","experiment_create"],"CMO":["memory_search","evidence_verify","scenario_simulate","experiment_create"],"CTO":["memory_search","evidence_verify"]}
+ return {"allowed":tool_name in allowed.get(str(agent).upper(),[]),"risk":tool["risk"],"reason":"ALLOWED" if tool_name in allowed.get(str(agent).upper(),[]) else "AGENT_PERMISSION_DENIED"}
+
+@app.get("/api/admin/ai/tools")
+def ai_tools():
+ return jsonify(ok=True,tools=AI_TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ decision=agent_tool_permission(b.get("agent"),b.get("tool"))
+ return jsonify(ok=True,agent=str(b.get("agent","")).upper(),tool=b.get("tool"),authorization=decision)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
