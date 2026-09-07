@@ -1760,6 +1760,39 @@ def ai_persist_status(token):
   checks[table]=not (isinstance(r,dict) and "_error" in r)
  return checks
 
+AI_CONTEXT_SOURCES=["products","orders","customers","ai_event_history","ai_recommendations","ai_executions","ai_learning_memory"]
+
+def ai_context_fetch(token,table,limit=25):
+ rows=ai_repo_get(table,token,"select=*&order=created_at.desc&limit="+str(limit)) if table.startswith("ai_") else supabase_request(table+"?select=*&limit="+str(limit),token=token)
+ return rows if isinstance(rows,list) else []
+
+def build_ai_context(token,query=None,event_type=None,limit=25):
+ context={"query":query,"event_type":event_type,"generated_at":datetime.datetime.utcnow().isoformat()+"Z","sources":{},"summary":{}}
+ for source in AI_CONTEXT_SOURCES:
+  rows=ai_context_fetch(token,source,limit)
+  context["sources"][source]=rows
+  context["summary"][source+"_count"]=len(rows)
+ if event_type:
+  events=context["sources"].get("ai_event_history",[])
+  context["sources"]["ai_event_history"]=[e for e in events if e.get("event_type")==event_type]
+  context["summary"]["filtered_event_count"]=len(context["sources"]["ai_event_history"])
+ return context
+
+@app.post("/api/admin/ai/context/build")
+def build_ai_context_endpoint():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ context=build_ai_context(token,b.get("query"),str(b.get("event_type","")).upper() or None,min(int(b.get("limit",25)),100))
+ return jsonify(ok=True,context=context)
+
+@app.get("/api/admin/ai/context/sources")
+def ai_context_sources():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,sources=AI_CONTEXT_SOURCES,architecture="database_and_institutional_memory")
+
+
 @app.get("/api/admin/ai/persistence/status")
 def ai_persistence_status():
  auth=request.headers.get("Authorization","")
