@@ -1884,6 +1884,32 @@ def council_live_execution_plan(token,problem,event_type=None,agents=None,limit=
  ])
  return {"problem":problem,"runtime":runtime,"execution_plan":calls,"persistence":{"table":"ai_council_runs","fallback":"in-memory response only"},"governance":"LLM execution results are recommendations; controlled actions remain behind approval workflow."}
 
+NVIDIA_API_BASE=os.getenv("NVIDIA_API_BASE","https://integrate.api.nvidia.com/v1")
+NVIDIA_DEFAULT_MODEL=os.getenv("NVIDIA_DEFAULT_MODEL","deepseek-ai/deepseek-v4-flash-0731")
+
+def nvidia_chat(messages,model=None,temperature=0.2,max_tokens=4096):
+ key=os.getenv("NVIDIA_API_KEY")
+ if not key:return {"ok":False,"error":"NVIDIA_API_KEY is not configured","provider":"nvidia"}
+ try:
+  resp=requests.post(NVIDIA_API_BASE+"/chat/completions",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},json={"model":model or NVIDIA_DEFAULT_MODEL,"messages":messages,"temperature":temperature,"max_tokens":max_tokens,"stream":False},timeout=120)
+  if resp.status_code>=400:return {"ok":False,"error":resp.text[:1000],"status_code":resp.status_code,"provider":"nvidia"}
+  data=resp.json();choice=(data.get("choices") or [{}])[0].get("message",{})
+  return {"ok":True,"provider":"nvidia","model":model or NVIDIA_DEFAULT_MODEL,"content":choice.get("content",""),"reasoning":choice.get("reasoning_content"),"usage":data.get("usage")}
+ except Exception as e:return {"ok":False,"error":str(e),"provider":"nvidia"}
+
+@app.get("/api/admin/ai/providers/nvidia/status")
+def nvidia_provider_status():
+ return jsonify(ok=True,provider="nvidia_nim",configured=bool(os.getenv("NVIDIA_API_KEY")),base_url=NVIDIA_API_BASE,default_model=NVIDIA_DEFAULT_MODEL)
+
+@app.post("/api/admin/ai/providers/nvidia/chat")
+def nvidia_provider_chat():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};messages=b.get("messages") or []
+ if not messages:return jsonify(error="messages are required"),400
+ result=nvidia_chat(messages,b.get("model"),float(b.get("temperature",0.2)),min(int(b.get("max_tokens",4096)),8192))
+ return jsonify(result), (200 if result.get("ok") else 503)
+
 @app.post("/api/admin/ai/council/execute")
 def execute_council_plan():
  auth=request.headers.get("Authorization","")
