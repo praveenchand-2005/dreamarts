@@ -2579,6 +2579,39 @@ def execute_ai_tool():
   out={"message":"Scenario simulation requires its existing dedicated endpoint"}
  return jsonify(ok=True,tool=name,policy=policy,result=out)
 
+def tool_call_guard(tool_name,args,permissions=None):
+ permissions=permissions or {}
+ allowed=permissions.get(tool_name,permissions.get("*",False))
+ if not allowed:return {"allowed":False,"reason":"PERMISSION_DENIED","tool":tool_name}
+ if not isinstance(args,dict):return {"allowed":False,"reason":"INVALID_ARGUMENTS","tool":tool_name}
+ return {"allowed":True,"tool":tool_name}
+
+def registered_ai_tools():
+ return {
+  "semantic_memory_search":{"risk":"LOW","mode":"read"},
+  "evidence_verify":{"risk":"LOW","mode":"read"},
+  "business_metrics":{"risk":"LOW","mode":"read"},
+  "record_outcome":{"risk":"MEDIUM","mode":"write"}
+ }
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=registered_ai_tools())
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_ai_tool_use():
+ b=request.get_json(silent=True) or {}
+ requested=b.get("tools") or []
+ permissions=b.get("permissions") or {"semantic_memory_search":True,"evidence_verify":True,"business_metrics":True,"record_outcome":False}
+ plan=[]
+ registry=registered_ai_tools()
+ for item in requested:
+  name=item.get("name") if isinstance(item,dict) else str(item)
+  args=item.get("args",{}) if isinstance(item,dict) else {}
+  guard=tool_call_guard(name,args,permissions)
+  plan.append({"name":name,"args":args,"registered":name in registry,"risk":registry.get(name,{}).get("risk","UNKNOWN"),"guard":guard})
+ return jsonify(ok=True,plan=plan,governance="Tool execution must pass permission and risk checks; planning does not execute external actions.")
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
