@@ -1849,6 +1849,27 @@ def build_council_context(token,problem,event_type=None,agents=None,limit=12):
  runtimes={agent:{"agent":agent,"shared_context":shared,"instruction":f"Analyze the problem from the {agent} executive perspective. Use shared evidence, identify assumptions and uncertainty, and provide an independent recommendation."} for agent in agents}
  return {"problem":problem,"event_type":event_type,"shared_context":shared,"agent_runtime_contexts":runtimes,"council_instruction":"All agents analyze independently from the same evidence base before deliberation and synthesis.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
 
+def build_council_deliberation_protocol(token,problem,event_type=None,agents=None,limit=12):
+ council=build_council_context(token,problem,event_type,agents,limit);names=list(council["agent_runtime_contexts"].keys())
+ rounds=[]
+ for i,name in enumerate(names):
+  rounds.append({"round":i+1,"type":"INITIAL_POSITION","agent":name,"instruction":council["agent_runtime_contexts"][name]["instruction"]})
+ rounds.append({"round":len(rounds)+1,"type":"CHALLENGE","instruction":"Review other executive positions. Challenge unsupported assumptions, identify conflicts, and request stronger evidence."})
+ rounds.append({"round":len(rounds)+1,"type":"EVIDENCE_REASSESSMENT","instruction":"Reassess the shared evidence and disagreements. Separate consensus from unresolved uncertainty."})
+ rounds.append({"round":len(rounds)+1,"type":"FINAL_SYNTHESIS","instruction":"Produce ranked options, trade-offs, dissenting views, confidence, and recommended next action. This remains decision support."})
+ return {"problem":problem,"shared_context":council["shared_context"],"participants":names,"deliberation_rounds":rounds,"governance":"No council output may directly execute controlled actions without the existing approval workflow.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
+
+@app.post("/api/admin/ai/council/deliberate")
+def prepare_council_deliberation():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};problem=str(b.get("problem","")).strip()
+ if not problem:return jsonify(error="problem is required"),400
+ agents=[str(x).upper() for x in b.get("agents",[]) if str(x).strip()] or None
+ protocol=build_council_deliberation_protocol(token,problem,str(b.get("event_type","")).upper() or None,agents,min(int(b.get("limit",12)),40))
+ return jsonify(ok=True,deliberation=protocol)
+
+
 @app.post("/api/admin/ai/council/context")
 def build_council_context_endpoint():
  auth=request.headers.get("Authorization","")
