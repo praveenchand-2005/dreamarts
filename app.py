@@ -2332,6 +2332,30 @@ def plan_ai_tool_use():
  checks=[tool_permission_check(x,agent,b.get("args",{})) for x in requested]
  return jsonify(ok=True,agent=agent,tool_plan=checks,auto_executable=[x for x in checks if x["allowed"] and x["risk"]=="LOW"],approval_required=[x for x in checks if x["allowed"] and x["requires_founder_approval"]])
 
+TOOL_REGISTRY={
+ "institutional_memory":{"description":"Search Dreamarts semantic institutional memory","risk":"LOW"},
+ "decision_outcomes":{"description":"Retrieve historical decision outcomes","risk":"LOW"},
+ "agent_performance":{"description":"Retrieve agent calibration performance","risk":"LOW"},
+ "evidence_verify":{"description":"Verify claims against internal evidence","risk":"LOW"}
+}
+
+def agent_tool_plan(goal,available=None):
+ available=available or list(TOOL_REGISTRY)
+ goal=str(goal or "").lower();selected=[]
+ if any(x in goal for x in ("history","previous","before","past")):selected.append("institutional_memory")
+ if any(x in goal for x in ("outcome","worked","result","accuracy")):selected.append("decision_outcomes")
+ if any(x in goal for x in ("agent","performance","best advisor")):selected.append("agent_performance")
+ if any(x in goal for x in ("verify","evidence","claim","true")):selected.append("evidence_verify")
+ return {"goal":goal,"selected_tools":selected,"available_tools":[{"name":x,**TOOL_REGISTRY[x]} for x in available if x in TOOL_REGISTRY]}
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_agent_tools():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};goal=b.get("goal","")
+ if not goal:return jsonify(error="goal is required"),400
+ return jsonify(ok=True,plan=agent_tool_plan(goal,b.get("available_tools")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
