@@ -2246,6 +2246,33 @@ def request_ai_tool():
  token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
  return jsonify(agent_tool_request(b.get("tool"),b.get("arguments",{}),token))
 
+def dreamarts_tool_registry():
+ return {
+  "memory_search":{"risk":"LOW","permission":"READ","description":"Search institutional semantic memory"},
+  "evidence_verify":{"risk":"LOW","permission":"READ","description":"Verify claims against known evidence"},
+  "outcome_record":{"risk":"MEDIUM","permission":"WRITE","description":"Record business decision outcomes"},
+  "strategy_simulate":{"risk":"LOW","permission":"READ","description":"Run decision-support scenario simulation"}
+ }
+
+def authorize_agent_tool(agent,tool_name,requested_mode="READ"):
+ tool=dreamarts_tool_registry().get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if requested_mode=="WRITE" and tool["permission"]!="WRITE":return {"allowed":False,"reason":"PERMISSION_DENIED"}
+ return {"allowed":True,"risk":tool["risk"],"requires_founder_approval":tool["risk"] in ("MEDIUM","HIGH"),"tool":tool}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ return jsonify(ok=True,tools=dreamarts_tool_registry())
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,authorization=authorize_agent_tool(b.get("agent",""),b.get("tool",""),b.get("mode","READ")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
