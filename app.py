@@ -2182,6 +2182,29 @@ def run_ai_tool():
  if not agent_tool_allowed(tool,b.get("agent","")):return jsonify(error="Tool not permitted"),403
  return jsonify(execute_agent_tool(tool,b.get("args",{}),token))
 
+TOOL_REGISTRY={
+ "institutional_memory_search":{"risk":"LOW","requires_approval":False,"description":"Search stored institutional memory"},
+ "evidence_verify":{"risk":"LOW","requires_approval":False,"description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"LOW","requires_approval":False,"description":"Run decision-support scenario simulation"},
+ "experiment_create":{"risk":"MEDIUM","requires_approval":True,"description":"Create a bounded strategic experiment"}
+}
+def tool_policy(tool_name):
+ t=TOOL_REGISTRY.get(tool_name)
+ if not t:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ return {"allowed":True,"tool":tool_name,**t}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};name=b.get("tool")
+ policy=tool_policy(name)
+ return jsonify(ok=True,policy=policy,execution="APPROVAL_REQUIRED" if policy.get("requires_approval") else "SAFE_TO_EXECUTE")
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
