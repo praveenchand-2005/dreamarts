@@ -2305,6 +2305,33 @@ def run_ai_tool():
  name=str(b.get("tool",""));args=b.get("args") or {}
  return jsonify(execute_agent_tool(name,args,token))
 
+TOOL_REGISTRY={
+ "institutional_memory":{"risk":"LOW","description":"Search Dreamarts institutional memory"},
+ "semantic_memory":{"risk":"LOW","description":"Search semantic vector memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario simulation"},
+ "experiment_create":{"risk":"MEDIUM","description":"Create controlled business experiment"}
+}
+
+def tool_permission_check(tool_name,agent,requested_args=None):
+ tool=TOOL_REGISTRY.get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL","risk":"HIGH"}
+ risk=tool["risk"]
+ return {"allowed":True,"reason":"REGISTERED_TOOL","risk":risk,"agent":agent,"requires_founder_approval":risk=="MEDIUM","tool":tool_name}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_ai_tool_use():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ agent=str(b.get("agent","")).upper();requested=b.get("tools") or []
+ checks=[tool_permission_check(x,agent,b.get("args",{})) for x in requested]
+ return jsonify(ok=True,agent=agent,tool_plan=checks,auto_executable=[x for x in checks if x["allowed"] and x["risk"]=="LOW"],approval_required=[x for x in checks if x["allowed"] and x["requires_founder_approval"]])
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
