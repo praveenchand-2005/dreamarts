@@ -1939,6 +1939,28 @@ def validated_nvidia_call(messages,required_fields,model=None,temperature=0.2,ma
  result["validated"]=False;result["validation_error"]=parsed.get("error");return result
 
 
+def score_ai_reliability(result,context_text=""):
+ data=result.get("structured") or {}
+ evidence=data.get("evidence") or []
+ assumptions=data.get("assumptions") or []
+ risks=data.get("risks") or []
+ confidence=data.get("confidence",0)
+ try: confidence=max(0,min(1,float(confidence)))
+ except Exception: confidence=0
+ structural=1.0 if result.get("validated") else 0.25
+ evidence_score=min(1.0,len(evidence)/4.0)
+ assumption_penalty=min(0.25,len(assumptions)*0.04)
+ risk_awareness=min(1.0,len(risks)/3.0)
+ calibration=1-abs(confidence-evidence_score)*0.5
+ reliability=max(0,min(1,(structural*.30)+(evidence_score*.25)+(risk_awareness*.15)+(calibration*.30)-assumption_penalty))
+ return {"reliability_score":round(reliability,3),"structural_score":structural,"evidence_score":round(evidence_score,3),"risk_awareness":round(risk_awareness,3),"confidence_calibration":round(calibration,3),"assumption_count":len(assumptions),"evidence_count":len(evidence),"flags":["LOW_EVIDENCE" if evidence_score<.25 else None,"LOW_RELIABILITY" if reliability<.5 else None],"note":"Heuristic decision-support reliability score; not a guarantee of factual correctness."}
+
+def attach_council_reliability(result,context_text=""):
+ result["reliability"]=score_ai_reliability(result,context_text)
+ result["reliability"]["flags"]=[x for x in result["reliability"]["flags"] if x]
+ return result
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
@@ -1946,11 +1968,11 @@ def execute_live_council(token,problem,event_type=None,agents=None,limit=12,mode
  runtime=build_agent_deliberation_runtime(token,problem,event_type,agents,limit);context=runtime["shared_context"];outputs={}
  for agent in runtime["participants"]:
   result=validated_nvidia_call(council_agent_prompt(agent,problem,context),["position","evidence","assumptions","risks","recommendation","confidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
-  outputs[agent]=result
+  outputs[agent]=attach_council_reliability(result,str(context))
  challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs},default=str)}]
- challenge=validated_nvidia_call(challenge_prompt,["challenges","agreements","disagreements","missing_evidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
+ challenge=attach_council_reliability(validated_nvidia_call(challenge_prompt,["challenges","agreements","disagreements","missing_evidence"],model=model,temperature=0.2,max_tokens=3000,retries=1),str(context))
  synthesis_prompt=[{"role":"system","content":"You are Dreamarts Council Synthesis. Produce valid JSON: ranked_options, tradeoffs, dissenting_views, confidence, recommended_next_action. This is decision support, not autonomous execution."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"challenge":challenge},default=str)}]
- synthesis=validated_nvidia_call(synthesis_prompt,["ranked_options","tradeoffs","dissenting_views","confidence","recommended_next_action"],model=model,temperature=0.15,max_tokens=4000,retries=1)
+ synthesis=attach_council_reliability(validated_nvidia_call(synthesis_prompt,["ranked_options","tradeoffs","dissenting_views","confidence","recommended_next_action"],model=model,temperature=0.15,max_tokens=4000,retries=1),str(context))
  return {"runtime":runtime,"agent_outputs":outputs,"challenge":challenge,"synthesis":synthesis}
 
 @app.post("/api/admin/ai/council/live")
