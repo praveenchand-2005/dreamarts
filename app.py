@@ -2669,6 +2669,25 @@ def authorize_ai_tool():
  result=authorize_agent_tool(str(b.get("tool","")),b.get("agent"),bool(b.get("approved",False)))
  return jsonify(ok=True,tool=b.get("tool"),agent=b.get("agent"),authorization=result)
 
+TOOL_REGISTRY={
+ "institutional_memory_search":{"risk":"LOW","description":"Search internal semantic business memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against stored internal evidence"},
+ "outcome_record":{"risk":"MEDIUM","description":"Record a decision outcome for learning"}
+}
+def authorize_agent_tool(tool_name,agent=""):
+ spec=TOOL_REGISTRY.get(tool_name)
+ if not spec:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ return {"allowed":spec["risk"]=="LOW","risk":spec["risk"],"reason":"AUTO_ALLOWED_LOW_RISK" if spec["risk"]=="LOW" else "APPROVAL_REQUIRED"}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,tool=b.get("tool"),authorization=authorize_agent_tool(b.get("tool",""),b.get("agent","")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
