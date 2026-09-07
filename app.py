@@ -2712,6 +2712,34 @@ def authorize_ai_tool():
  if not tool or not agent:return jsonify(error="tool and agent are required"),400
  return jsonify(ok=True,authorization=authorize_agent_tool(tool,agent,b.get("context")))
 
+def dreamarts_tool_registry():
+ return {
+  "memory_semantic_search":{"risk":"LOW","handler":"semantic_memory_search","description":"Search institutional memory"},
+  "evidence_verify":{"risk":"LOW","handler":"verify_evidence","description":"Verify claims against internal evidence"},
+  "business_read":{"risk":"LOW","handler":"read_only","description":"Read approved business intelligence"},
+  "experiment_create":{"risk":"MEDIUM","handler":"approval_required","description":"Create controlled experiment"},
+  "strategy_execute":{"risk":"HIGH","handler":"founder_required","description":"Execute business strategy"}
+ }
+
+def authorize_agent_tool(tool_name,agent,requested_risk="LOW"):
+ tool=dreamarts_tool_registry().get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ risk=tool["risk"]
+ if risk=="HIGH":return {"allowed":False,"reason":"FOUNDER_APPROVAL_REQUIRED","approval_required":True}
+ if risk=="MEDIUM":return {"allowed":False,"reason":"APPROVAL_REQUIRED","approval_required":True}
+ return {"allowed":True,"reason":"READ_ONLY_OR_LOW_RISK","approval_required":False}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=dreamarts_tool_registry())
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,authorization=authorize_agent_tool(b.get("tool"),b.get("agent"),b.get("risk","LOW")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
