@@ -2406,6 +2406,32 @@ def authorize_ai_tool():
  policy=agent_tool_policy(agent,tool_name)
  return jsonify(ok=True,agent=agent,tool=tool_name,policy=policy)
 
+def dreamarts_tool_registry():
+ return {
+  "memory_search":{"risk":"LOW","approval_required":False,"description":"Search institutional memory"},
+  "evidence_verify":{"risk":"LOW","approval_required":False,"description":"Verify claims against available evidence"},
+  "scenario_simulate":{"risk":"LOW","approval_required":False,"description":"Simulate strategic options"},
+  "experiment_create":{"risk":"MEDIUM","approval_required":True,"description":"Create controlled strategic experiment"},
+  "external_action":{"risk":"HIGH","approval_required":True,"description":"Reserved for future external integrations"}
+ }
+
+def authorize_agent_tool(tool_name,approved=False):
+ tool=dreamarts_tool_registry().get(tool_name)
+ if not tool:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if tool["approval_required"] and not approved:return {"allowed":False,"reason":"FOUNDER_APPROVAL_REQUIRED","risk":tool["risk"]}
+ return {"allowed":True,"risk":tool["risk"],"description":tool["description"]}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=dreamarts_tool_registry())
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,authorization=authorize_agent_tool(b.get("tool"),bool(b.get("approved",False))))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
