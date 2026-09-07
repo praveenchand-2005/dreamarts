@@ -2514,6 +2514,38 @@ def plan_ai_tool_use():
  plan=[{"tool":t,"authorization":authorize_agent_tool(agent,t,approved)} for t in requested]
  return jsonify(ok=True,agent=agent,plan=plan,governance="Tool execution must remain server-side and permission-checked.")
 
+def list_agent_tools():
+ return [
+  {"name":"memory_semantic_search","risk":"LOW","description":"Search institutional memory"},
+  {"name":"evidence_verify","risk":"LOW","description":"Verify claims against internal evidence"},
+  {"name":"scenario_simulate","risk":"LOW","description":"Run strategic scenario comparison"},
+  {"name":"experiment_create","risk":"MEDIUM","description":"Create bounded strategic experiment"}
+ ]
+
+def execute_agent_tool(name,args,token):
+ allowed={x["name"]:x for x in list_agent_tools()}
+ if name not in allowed:return {"ok":False,"error":"unknown_tool"}
+ risk=allowed[name]["risk"]
+ if risk!="LOW":return {"ok":False,"approval_required":True,"risk":risk,"tool":name}
+ if name=="memory_semantic_search":
+  q=vector_embedding(args.get("query",""));rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  ranked=sorted([{"id":r.get("id"),"text":r.get("text"),"similarity":cosine_similarity(q,r.get("embedding") or [])} for r in rows],key=lambda x:x["similarity"],reverse=True)[:5]
+  return {"ok":True,"tool":name,"results":ranked}
+ if name=="evidence_verify":
+  return {"ok":True,"tool":name,"result":verify_ai_claim(args.get("claim",""),ai_repo_select("ai_memory_vectors","*",token,limit=200) or [])}
+ return {"ok":False,"error":"tool_not_implemented"}
+
+@app.get("/api/admin/ai/tools")
+def agent_tools():
+ return jsonify(ok=True,tools=list_agent_tools())
+
+@app.post("/api/admin/ai/tools/execute")
+def agent_tool_execute():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ return jsonify(execute_agent_tool(b.get("tool"),b.get("args",{}),token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
