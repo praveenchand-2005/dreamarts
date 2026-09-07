@@ -2892,6 +2892,24 @@ def run_ai_tool():
  token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
  return jsonify(execute_ai_tool(b.get("tool",""),b.get("args",{}) or {},token))
 
+TOOL_REGISTRY={"memory_search":{"risk":"LOW","description":"Search institutional memory"},"evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},"scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario analysis"},"experiment_create":{"risk":"MEDIUM","description":"Create controlled strategic experiment"}}
+def agent_tool_request(tool_name,arguments,agent="SYSTEM"):
+ spec=TOOL_REGISTRY.get(tool_name)
+ if not spec:return {"ok":False,"error":"UNKNOWN_TOOL"}
+ return {"ok":True,"tool":tool_name,"arguments":arguments or {},"agent":agent,"risk":spec["risk"],"requires_approval":spec["risk"]!="LOW","executed":False}
+
+@app.get("/api/admin/ai/tools")
+def ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/request")
+def ai_tool_request():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ request_obj=agent_tool_request(b.get("tool"),b.get("arguments",{}),b.get("agent","SYSTEM"))
+ return jsonify(**request_obj)
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
