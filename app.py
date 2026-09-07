@@ -2273,6 +2273,38 @@ def authorize_ai_tool():
  b=request.get_json(silent=True) or {}
  return jsonify(ok=True,authorization=authorize_agent_tool(b.get("agent",""),b.get("tool",""),b.get("mode","READ")))
 
+def dreamarts_tool_registry():
+ return {
+  "memory_search":{"risk":"LOW","description":"Search institutional semantic memory"},
+  "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+  "scenario_simulate":{"risk":"MEDIUM","description":"Run strategic scenario analysis"},
+  "record_outcome":{"risk":"MEDIUM","description":"Record measured business outcomes"}
+ }
+
+def execute_agent_tool(tool_name,args,token):
+ registry=dreamarts_tool_registry()
+ if tool_name not in registry:return {"ok":False,"error":"UNKNOWN_TOOL"}
+ risk=registry[tool_name]["risk"]
+ if tool_name=="memory_search":
+  q=args.get("query",""); rows=ai_repo_select("ai_memory_vectors","*",token,limit=200) or []
+  emb=vector_embedding(q); scored=[{"id":r.get("id"),"text":r.get("text"),"metadata":r.get("metadata",{}),"similarity":round(cosine_similarity(emb,r.get("embedding") or []),4)} for r in rows]
+  return {"ok":True,"tool":tool_name,"risk":risk,"results":sorted(scored,key=lambda x:x["similarity"],reverse=True)[:int(args.get("top_k",5))]}
+ if tool_name=="evidence_verify":
+  return {"ok":True,"tool":tool_name,"risk":risk,"result":verify_ai_claim(args.get("claim",""),(ai_repo_select("ai_memory_vectors","*",token,limit=200) or []))}
+ return {"ok":False,"error":"TOOL_REQUIRES_CONTROLLED_WORKFLOW","tool":tool_name,"risk":risk}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=dreamarts_tool_registry())
+
+@app.post("/api/admin/ai/tools/execute")
+def run_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ name=str(b.get("tool",""));args=b.get("args") or {}
+ return jsonify(execute_agent_tool(name,args,token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
