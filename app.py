@@ -2816,6 +2816,38 @@ def run_agent_tool():
  if spec["requires_approval"] and not b.get("approved"):return jsonify(ok=False,status="APPROVAL_REQUIRED",tool=name,risk=spec["risk"]),403
  return jsonify(execute_agent_tool(name,b.get("args") or {},token))
 
+def get_agent_tools(agent):
+ base={"memory_search":{"description":"Search institutional memory","risk":"low"},"evidence_verify":{"description":"Verify claims against stored evidence","risk":"low"},"business_read":{"description":"Read approved business intelligence","risk":"low"}}
+ return base
+
+def execute_agent_tool(tool_name,args,token):
+ if tool_name=="memory_search":
+  q=(args or {}).get("query",""); rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  terms=set(re.findall(r"\w+",str(q).lower()))
+  ranked=sorted(rows,key=lambda r:sum(t in json.dumps(r,default=str).lower() for t in terms),reverse=True)[:10]
+  return {"ok":True,"tool":tool_name,"result":ranked}
+ if tool_name=="evidence_verify":
+  return {"ok":True,"tool":tool_name,"result":[verify_ai_claim(c,ai_repo_select("ai_memory_vectors","*",token,limit=200) or []) for c in (args or {}).get("claims",[])]}
+ if tool_name=="business_read":
+  return {"ok":True,"tool":tool_name,"result":{"message":"Approved read-only business connector placeholder","data":[]}}
+ return {"ok":False,"error":"Tool not permitted or unavailable"}
+
+@app.get("/api/admin/ai/agents/tools")
+def agent_tools():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ agent=request.args.get("agent","CEO").upper()
+ return jsonify(ok=True,agent=agent,tools=get_agent_tools(agent))
+
+@app.post("/api/admin/ai/agents/tool-execute")
+def agent_tool_execute():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ agent=str(b.get("agent","CEO")).upper();tool=b.get("tool");args=b.get("arguments",{})
+ if tool not in get_agent_tools(agent):return jsonify(error="Tool not permitted"),403
+ return jsonify(execute_agent_tool(tool,args,token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
