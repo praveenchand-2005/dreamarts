@@ -2848,6 +2848,16 @@ def agent_tool_execute():
  if tool not in get_agent_tools(agent):return jsonify(error="Tool not permitted"),403
  return jsonify(execute_agent_tool(tool,args,token))
 
+def agent_tool_catalog(agent):
+ return {"memory_search":{"mode":"read"},"evidence_verify":{"mode":"read"},"business_read":{"mode":"read"}}
+
+@app.get("/api/admin/ai/agents/tools")
+def list_agent_tools():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "): return jsonify(error="Unauthorized"),401
+ agent=request.args.get("agent","CEO").upper()
+ return jsonify(ok=True,agent=agent,tools=agent_tool_catalog(agent))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
