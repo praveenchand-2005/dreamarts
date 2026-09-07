@@ -1859,6 +1859,28 @@ def build_council_deliberation_protocol(token,problem,event_type=None,agents=Non
  rounds.append({"round":len(rounds)+1,"type":"FINAL_SYNTHESIS","instruction":"Produce ranked options, trade-offs, dissenting views, confidence, and recommended next action. This remains decision support."})
  return {"problem":problem,"shared_context":council["shared_context"],"participants":names,"deliberation_rounds":rounds,"governance":"No council output may directly execute controlled actions without the existing approval workflow.","generated_at":datetime.datetime.utcnow().isoformat()+"Z"}
 
+def build_agent_deliberation_runtime(token,problem,event_type=None,agents=None,limit=12):
+ protocol=build_council_deliberation_protocol(token,problem,event_type,agents,limit)
+ participants=protocol["participants"]
+ state={"problem":problem,"shared_context":protocol["shared_context"],"participants":participants,"rounds":[]}
+ for agent in participants:
+  state["rounds"].append({"type":"INITIAL_ANALYSIS","agent":agent,"input":{"problem":problem,"context":"shared_context"},"expected_output":{"position":"string","evidence":"array","assumptions":"array","risks":"array","recommendation":"string","confidence":"0-1"}})
+ state["rounds"].append({"type":"CROSS_AGENT_CHALLENGE","input":"all initial analyses","expected_output":{"challenges":"array","agreements":"array","disagreements":"array","missing_evidence":"array"}})
+ state["rounds"].append({"type":"EVIDENCE_REASSESSMENT","input":"shared evidence + all analyses + challenges","expected_output":{"validated_facts":"array","unresolved_questions":"array","revised_positions":"array"}})
+ state["rounds"].append({"type":"SYNTHESIS","input":"complete deliberation state","expected_output":{"ranked_options":"array","tradeoffs":"array","dissenting_views":"array","confidence":"0-1","recommended_next_action":"string"}})
+ state["governance"]="Runtime outputs are decision support and must pass existing recommendation approval controls before execution."
+ return state
+
+@app.post("/api/admin/ai/council/runtime")
+def council_agent_runtime():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};problem=str(b.get("problem","")).strip()
+ if not problem:return jsonify(error="problem is required"),400
+ agents=[str(x).upper() for x in b.get("agents",[]) if str(x).strip()] or None
+ runtime=build_agent_deliberation_runtime(token,problem,str(b.get("event_type","")).upper() or None,agents,min(int(b.get("limit",12)),40))
+ return jsonify(ok=True,runtime=runtime)
+
 @app.post("/api/admin/ai/council/deliberate")
 def prepare_council_deliberation():
  auth=request.headers.get("Authorization","")
