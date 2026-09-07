@@ -1945,12 +1945,12 @@ def council_agent_prompt(agent,problem,context):
 def execute_live_council(token,problem,event_type=None,agents=None,limit=12,model=None):
  runtime=build_agent_deliberation_runtime(token,problem,event_type,agents,limit);context=runtime["shared_context"];outputs={}
  for agent in runtime["participants"]:
-  result=nvidia_chat(council_agent_prompt(agent,problem,context),model=model,temperature=0.2,max_tokens=3000)
+  result=validated_nvidia_call(council_agent_prompt(agent,problem,context),["position","evidence","assumptions","risks","recommendation","confidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
   outputs[agent]=result
  challenge_prompt=[{"role":"system","content":"You are Dreamarts Council Reviewer. Review executive analyses. Return valid JSON: challenges, agreements, disagreements, missing_evidence."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs},default=str)}]
- challenge=nvidia_chat(challenge_prompt,model=model,temperature=0.2,max_tokens=3000)
+ challenge=validated_nvidia_call(challenge_prompt,["challenges","agreements","disagreements","missing_evidence"],model=model,temperature=0.2,max_tokens=3000,retries=1)
  synthesis_prompt=[{"role":"system","content":"You are Dreamarts Council Synthesis. Produce valid JSON: ranked_options, tradeoffs, dissenting_views, confidence, recommended_next_action. This is decision support, not autonomous execution."},{"role":"user","content":json.dumps({"problem":problem,"context":context,"analyses":outputs,"challenge":challenge},default=str)}]
- synthesis=nvidia_chat(synthesis_prompt,model=model,temperature=0.15,max_tokens=4000)
+ synthesis=validated_nvidia_call(synthesis_prompt,["ranked_options","tradeoffs","dissenting_views","confidence","recommended_next_action"],model=model,temperature=0.15,max_tokens=4000,retries=1)
  return {"runtime":runtime,"agent_outputs":outputs,"challenge":challenge,"synthesis":synthesis}
 
 @app.post("/api/admin/ai/council/live")
