@@ -2483,6 +2483,37 @@ def ai_tool_plan():
 def ai_tools():
  return jsonify(ok=True,tools=DREAMARTS_TOOLS)
 
+TOOL_REGISTRY={
+ "institutional_memory":{"risk":"LOW","description":"Search internal business memory"},
+ "decision_outcomes":{"risk":"LOW","description":"Read historical decision outcomes"},
+ "semantic_memory":{"risk":"LOW","description":"Semantic search over embedded memories"},
+ "scenario_simulation":{"risk":"MEDIUM","description":"Run strategic scenario comparison"}
+}
+def authorize_agent_tool(agent,tool_name,approved_tools=None):
+ if tool_name not in TOOL_REGISTRY:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ if approved_tools is not None and tool_name not in approved_tools:return {"allowed":False,"reason":"NOT_APPROVED_FOR_AGENT"}
+ return {"allowed":True,"risk":TOOL_REGISTRY[tool_name]["risk"],"description":TOOL_REGISTRY[tool_name]["description"]}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ b=request.get_json(silent=True) or {}
+ agent=str(b.get("agent","")).upper();tool=str(b.get("tool",""))
+ allowed=b.get("approved_tools")
+ return jsonify(ok=True,agent=agent,tool=tool,authorization=authorize_agent_tool(agent,tool,allowed))
+
+@app.post("/api/admin/ai/tools/plan")
+def plan_ai_tool_use():
+ b=request.get_json(silent=True) or {}
+ requested=b.get("tools") or []
+ agent=str(b.get("agent","")).upper()
+ approved=b.get("approved_tools")
+ plan=[{"tool":t,"authorization":authorize_agent_tool(agent,t,approved)} for t in requested]
+ return jsonify(ok=True,agent=agent,plan=plan,governance="Tool execution must remain server-side and permission-checked.")
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
