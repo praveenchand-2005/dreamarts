@@ -2151,6 +2151,37 @@ def agent_tool_execute():
  result=execute_agent_tool(tool,b.get("args") or {},token)
  return jsonify(ok=True,agent=agent,result=result,audit={"agent":agent,"tool":tool,"timestamp":datetime.datetime.utcnow().isoformat()+"Z"})
 
+TOOL_REGISTRY={
+ "institutional_memory_search":{"risk":"LOW","description":"Search internal institutional memory"},
+ "outcome_lookup":{"risk":"LOW","description":"Retrieve recorded decision outcomes"},
+ "semantic_memory_search":{"risk":"LOW","description":"Search vector semantic memory"}
+}
+def agent_tool_allowed(tool,agent=""):
+ return tool in TOOL_REGISTRY and TOOL_REGISTRY[tool]["risk"]=="LOW"
+
+def execute_agent_tool(tool,args,token):
+ if not agent_tool_allowed(tool):return {"ok":False,"error":"tool_not_allowed"}
+ if tool=="institutional_memory_search":
+  rows=ai_repo_select("ai_memory_vectors","*",token,limit=int(args.get("limit",20))) or []
+  q=str(args.get("query","")).lower()
+  return {"ok":True,"tool":tool,"results":[r for r in rows if q in json.dumps(r,default=str).lower()][:10]}
+ if tool=="outcome_lookup":
+  return {"ok":True,"tool":tool,"results":ai_repo_select("ai_decision_outcomes","*",token,limit=int(args.get("limit",20))) or []}
+ return {"ok":False,"error":"unknown_tool"}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/execute")
+def run_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ tool=b.get("tool","")
+ if not agent_tool_allowed(tool,b.get("agent","")):return jsonify(error="Tool not permitted"),403
+ return jsonify(execute_agent_tool(tool,b.get("args",{}),token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
