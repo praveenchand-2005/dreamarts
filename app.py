@@ -1871,6 +1871,32 @@ def build_agent_deliberation_runtime(token,problem,event_type=None,agents=None,l
  state["governance"]="Runtime outputs are decision support and must pass existing recommendation approval controls before execution."
  return state
 
+def council_live_execution_plan(token,problem,event_type=None,agents=None,limit=12):
+ runtime=build_agent_deliberation_runtime(token,problem,event_type,agents,limit)
+ participants=runtime["participants"]
+ calls=[]
+ for agent in participants:
+  calls.append({"stage":"INITIAL_ANALYSIS","agent":agent,"input_sources":["shared_context","problem"],"output_schema":runtime["rounds"][0]["expected_output"],"persist_result":True})
+ calls.extend([
+  {"stage":"CROSS_AGENT_CHALLENGE","agent":"COUNCIL_REVIEWER","input_sources":["all_initial_analyses","shared_context"],"output_schema":runtime["rounds"][-3]["expected_output"],"persist_result":True},
+  {"stage":"EVIDENCE_REASSESSMENT","agent":"COUNCIL_REVIEWER","input_sources":["shared_context","initial_analyses","challenge"],"output_schema":runtime["rounds"][-2]["expected_output"],"persist_result":True},
+  {"stage":"FINAL_SYNTHESIS","agent":"COUNCIL_SYNTHESIS","input_sources":["complete_deliberation_state"],"output_schema":runtime["rounds"][-1]["expected_output"],"persist_result":True}
+ ])
+ return {"problem":problem,"runtime":runtime,"execution_plan":calls,"persistence":{"table":"ai_council_runs","fallback":"in-memory response only"},"governance":"LLM execution results are recommendations; controlled actions remain behind approval workflow."}
+
+@app.post("/api/admin/ai/council/execute")
+def execute_council_plan():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {};problem=str(b.get("problem","")).strip()
+ if not problem:return jsonify(error="problem is required"),400
+ agents=[str(x).upper() for x in b.get("agents",[]) if str(x).strip()] or None
+ plan=council_live_execution_plan(token,problem,str(b.get("event_type","")).upper() or None,agents,min(int(b.get("limit",12)),40))
+ run_id="council_"+uuid.uuid4().hex[:12]
+ record={"id":run_id,"problem":problem,"status":"PLANNED","execution_plan":plan["execution_plan"],"created_at":datetime.datetime.utcnow().isoformat()+"Z"}
+ stored=ai_repo_insert("ai_council_runs",record,token)
+ return jsonify(ok=True,run_id=run_id,status="PLANNED",execution=plan,persistence_mode="postgres" if stored is not None else "fallback",next_step="Dispatch each planned stage through configured LLM provider adapter")
+
 @app.post("/api/admin/ai/council/runtime")
 def council_agent_runtime():
  auth=request.headers.get("Authorization","")
