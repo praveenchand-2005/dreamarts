@@ -3011,6 +3011,28 @@ def authorize_ai_tool():
  b=request.get_json(silent=True) or {}
  return jsonify(ok=True,authorization=authorize_agent_tool(str(b.get("tool","")),str(b.get("permission","READ")).upper()))
 
+AI_CAPABILITIES={
+ "memory_search":{"risk":"low","mode":"read","description":"Search institutional memory"},
+ "evidence_verify":{"risk":"low","mode":"read","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"medium","mode":"analyze","description":"Run strategic scenario simulation"},
+ "experiment_create":{"risk":"medium","mode":"analyze","description":"Design bounded strategic experiment"}
+}
+
+def check_ai_capability(agent,capability_name,mode="read"):
+ item=AI_CAPABILITIES.get(capability_name)
+ if not item:return {"allowed":False,"reason":"UNKNOWN_CAPABILITY"}
+ if mode not in ("read","analyze") or item["mode"] not in ("read","analyze"):return {"allowed":False,"reason":"MODE_NOT_ALLOWED"}
+ return {"allowed":True,"risk":item["risk"],"capability":capability_name}
+
+@app.get("/api/admin/ai/capabilities")
+def list_ai_capabilities():
+ return jsonify(ok=True,capabilities=AI_CAPABILITIES)
+
+@app.post("/api/admin/ai/capabilities/check")
+def check_ai_capability_api():
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,result=check_ai_capability(b.get("agent"),b.get("capability"),b.get("mode","read")))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
