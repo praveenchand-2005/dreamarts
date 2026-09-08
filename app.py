@@ -2910,6 +2910,23 @@ def ai_tool_request():
  request_obj=agent_tool_request(b.get("tool"),b.get("arguments",{}),b.get("agent","SYSTEM"))
  return jsonify(**request_obj)
 
+def create_agent_execution_plan(goal,available_tools=None):
+ tools=available_tools or list(dreamarts_tool_registry().keys())
+ return {"goal":goal,"status":"PLANNED","steps":[
+  {"order":1,"action":"investigate_context","tool":"semantic_memory_search","risk":"LOW"},
+  {"order":2,"action":"verify_evidence","tool":"evidence_verify","risk":"LOW"},
+  {"order":3,"action":"evaluate_options","tool":"scenario_simulate","risk":"LOW"},
+  {"order":4,"action":"propose_controlled_action","tool":"experiment_create","risk":"MEDIUM"}
+ ],"available_tools":tools,"governance":"Plan generation does not execute actions. Medium and high risk actions require authorization."}
+
+@app.post("/api/admin/ai/workflows/plan")
+def plan_ai_workflow():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {};goal=str(b.get("goal","")).strip()
+ if not goal:return jsonify(error="goal is required"),400
+ return jsonify(ok=True,plan=create_agent_execution_plan(goal))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
