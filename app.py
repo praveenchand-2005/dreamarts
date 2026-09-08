@@ -2927,6 +2927,31 @@ def plan_ai_workflow():
  if not goal:return jsonify(error="goal is required"),400
  return jsonify(ok=True,plan=create_agent_execution_plan(goal))
 
+TOOL_REGISTRY={
+ "institutional_memory":{"risk":"LOW","description":"Search stored institutional memory"},
+ "semantic_memory":{"risk":"LOW","description":"Search semantic vector memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against stored evidence"},
+ "decision_outcomes":{"risk":"LOW","description":"Read historical decision outcomes"},
+ "agent_performance":{"risk":"LOW","description":"Read agent calibration performance"}
+}
+
+def agent_tool_policy(tool_name,agent=None):
+ spec=TOOL_REGISTRY.get(tool_name)
+ if not spec:return {"allowed":False,"reason":"UNKNOWN_TOOL"}
+ return {"allowed":spec["risk"]=="LOW","tool":tool_name,"risk":spec["risk"],"agent":agent,"reason":"READ_ONLY_TOOL_ALLOWED" if spec["risk"]=="LOW" else "APPROVAL_REQUIRED"}
+
+@app.get("/api/admin/ai/tools")
+def list_ai_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/authorize")
+def authorize_ai_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,policy=agent_tool_policy(b.get("tool"),b.get("agent")))
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
