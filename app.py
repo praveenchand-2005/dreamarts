@@ -2952,6 +2952,38 @@ def authorize_ai_tool():
  return jsonify(ok=True,policy=agent_tool_policy(b.get("tool"),b.get("agent")))
 
 
+TOOL_REGISTRY={
+ "memory_search":{"risk":"LOW","description":"Search institutional semantic memory"},
+ "evidence_verify":{"risk":"LOW","description":"Verify claims against internal evidence"},
+ "scenario_simulate":{"risk":"LOW","description":"Simulate strategic options"},
+ "experiment_create":{"risk":"MEDIUM","description":"Create bounded strategic experiment"}
+}
+def execute_agent_tool(tool_name,args,token):
+ if tool_name not in TOOL_REGISTRY:return {"ok":False,"error":"unknown_tool"}
+ if tool_name=="memory_search":
+  q=vector_embedding((args or {}).get("query",""));rows=ai_repo_select("ai_memory_vectors","*",token,limit=100) or []
+  ranked=sorted([{"id":r.get("id"),"text":r.get("text"),"similarity":round(cosine_similarity(q,r.get("embedding") or []),4)} for r in rows],key=lambda x:x["similarity"],reverse=True)
+  return {"ok":True,"results":ranked[:int((args or {}).get("top_k",5))]}
+ if tool_name=="evidence_verify":
+  mem=ai_repo_select("ai_memory_vectors","*",token,limit=200) or []
+  return {"ok":True,"results":[verify_ai_claim(c,mem) for c in (args or {}).get("claims",[])]}
+ return {"ok":False,"error":"tool_not_autonomous","requires_approval":TOOL_REGISTRY[tool_name]["risk"]!="LOW"}
+
+@app.get("/api/admin/ai/tools")
+def list_agent_tools():
+ return jsonify(ok=True,tools=TOOL_REGISTRY)
+
+@app.post("/api/admin/ai/tools/execute")
+def run_agent_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
+ name=b.get("tool");args=b.get("arguments",{})
+ meta=TOOL_REGISTRY.get(name)
+ if not meta:return jsonify(error="Unknown tool"),404
+ if meta["risk"]!="LOW" and not b.get("approved"):return jsonify(ok=False,requires_approval=True,tool=name,risk=meta["risk"]),202
+ return jsonify(execute_agent_tool(name,args,token))
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
