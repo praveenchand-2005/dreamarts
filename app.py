@@ -3062,6 +3062,27 @@ def agent_tool_execute():
  token=auth.split(" ",1)[1];b=request.get_json(silent=True) or {}
  return jsonify(execute_agent_tool(b.get("tool"),b.get("args") or {},token))
 
+def evaluate_tool_request(tool_name, arguments, permissions=None):
+ registry={
+  "memory_search":{"risk":"LOW","approval_required":False},
+  "evidence_verify":{"risk":"LOW","approval_required":False},
+  "business_metrics":{"risk":"LOW","approval_required":False},
+  "experiment_create":{"risk":"MEDIUM","approval_required":True},
+  "external_action":{"risk":"HIGH","approval_required":True}
+ }
+ spec=registry.get(tool_name)
+ if not spec:return {"allowed":False,"reason":"UNKNOWN_TOOL","tool":tool_name}
+ if permissions is not None and tool_name not in permissions:return {"allowed":False,"reason":"PERMISSION_DENIED","tool":tool_name}
+ return {"allowed":not spec["approval_required"],"tool":tool_name,"risk":spec["risk"],"approval_required":spec["approval_required"],"arguments":arguments}
+
+@app.post("/api/admin/ai/tools/evaluate")
+def evaluate_agent_tool():
+ auth=request.headers.get("Authorization","")
+ if not auth.startswith("Bearer "):return jsonify(error="Unauthorized"),401
+ b=request.get_json(silent=True) or {}
+ return jsonify(ok=True,tool_request=evaluate_tool_request(b.get("tool"),b.get("arguments",{}),b.get("permissions")))
+
+
 def council_agent_prompt(agent,problem,context):
  return [{"role":"system","content":f"You are the Dreamarts {agent} executive. Analyze only from your executive perspective. Return concise valid JSON with position, evidence, assumptions, risks, recommendation, confidence."},{"role":"user","content":json.dumps({"problem":problem,"institutional_context":context},default=str)}]
 
